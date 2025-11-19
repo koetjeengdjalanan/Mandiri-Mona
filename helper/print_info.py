@@ -7,6 +7,8 @@ from rich.table import Table
 
 from models.env import EnvironmentsVariables
 
+__all__: list[str] = ["info_request"]
+
 
 def info_request(requests: list[str], console: Console, env: EnvironmentsVariables) -> None:
     """
@@ -36,7 +38,7 @@ def info_request(requests: list[str], console: Console, env: EnvironmentsVariabl
     if "devices" in choices:
         table = Table(title="Device Information")
         table.add_column("Hostname", style="cyan", no_wrap=True)
-        table.add_column("IP Address", style="magenta")
+        table.add_column("IP Add", style="magenta")
         table.add_column("Username", style="green")
         table.add_column("Password", style="yellow")
 

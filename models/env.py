@@ -2,36 +2,59 @@
 
 from os import getenv
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Literal
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, DirectoryPath, Field, FilePath, PositiveInt, StrictBool, field_validator
 
 from helper.default_handler import create_filedir
 
 
 class ConnectionSettings(BaseModel):
     """
-    Configuration model for connection settings.
+    Configuration model for connection and concurrency settings.
 
-    This class defines connection-related parameters that can be configured
-    through environment variables or use default values.
+    This class defines the connection parameters and threading configuration used
+    throughout the application. All values can be overridden via environment variables.
 
     Attributes:
-        max_retry (int): Maximum number of retry attempts for failed connections.
-            Defaults to 3. Can be overridden by MAX_RETRY environment variable.
-        conn_timeout (int): Connection timeout in seconds.
-            Defaults to 30. Can be overridden by CONN_TIMEOUT environment variable.
-        read_timeout_override (int): Read timeout override value in seconds.
-            Defaults to 60. Can be overridden by READ_TIMEOUT_OVERRIDE environment variable.
-        num_of_threads (int): Number of threads to use for concurrent operations.
-            Defaults to 10. Can be overridden by NUM_OF_THREADS environment variable.
+        max_retry (PositiveInt): Maximum number of retry attempts for failed connections.
+            Default: 3 (from MAX_RETRY env var)
+        conn_timeout (PositiveInt): Connection timeout in seconds.
+            Default: 30 (from CONN_TIMEOUT env var)
+        read_timeout_override (PositiveInt): Read timeout override value in seconds.
+            Default: 60 (from READ_TIMEOUT_OVERRIDE env var)
+        num_of_threads (PositiveInt): Number of threads to use for concurrent operations.
+            Default: 8 (from NUM_OF_THREADS env var)
+
+    Validation Rules:
+        - max_retry: Must be at least 1
+        - conn_timeout: Must be positive (> 0)
+        - read_timeout_override: Must be positive (> 0)
+        - num_of_threads: Must be between 1 and 100 (inclusive)
+
+    Raises:
+        ValueError: If any field fails its validation constraints
+
+    Example:
+        >>> settings = ConnectionSettings()
+        >>> settings.max_retry
+        3
+        >>> settings = ConnectionSettings(max_retry=5, num_of_threads=16)
+        >>> settings.num_of_threads
+        16
     """
 
-    max_retry: int = int(getenv("MAX_RETRY", "3"))
-    conn_timeout: int = int(getenv("CONN_TIMEOUT", "30"))
-    read_timeout_override: int = int(getenv("READ_TIMEOUT_OVERRIDE", "60"))
-    num_of_threads: int = int(getenv("NUM_OF_THREADS", "10"))
+    max_retry: PositiveInt = Field(
+        int(getenv("MAX_RETRY", "3")), description="Maximum number of retry attempts for failed connections"
+    )
+    conn_timeout: PositiveInt = Field(int(getenv("CONN_TIMEOUT", "30")), description="Connection timeout in seconds")
+    read_timeout_override: PositiveInt = Field(
+        int(getenv("READ_TIMEOUT_OVERRIDE", "60")), description="Read timeout override value in seconds"
+    )
+    num_of_threads: PositiveInt = Field(
+        int(getenv("NUM_OF_THREADS", "8")), description="Number of threads to use for concurrent operations"
+    )
 
     @field_validator("conn_timeout", "read_timeout_override")
     @classmethod
@@ -91,11 +114,17 @@ class LoggingSettings(BaseModel):
         mandiri-MONA.log
     """
 
-    log_file_path: Path = Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log"))
-    log_rotate_time: str = str(getenv("LOG_ROTATE_TIME", "w0"))
-    log_backup_count: int = int(getenv("LOG_BACKUP_COUNT", "9"))
-    log_format: str = "%(asctime)s - %(levelname)s - %(message)s"
-    log_datetime_format: str = str(getenv("LOG_DATETIME_FORMAT", "%Y-%m-%d %H:%M:%S"))
+    log_file_path: FilePath = Field(
+        Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log")), description="Path to the log file"
+    )
+    log_rotate_time: str = Field(str(getenv("LOG_ROTATE_TIME", "w0")), description="Log rotation interval")
+    log_backup_count: int = Field(
+        int(getenv("LOG_BACKUP_COUNT", "9")), description="Number of backup log files to retain"
+    )
+    log_format: str = Field("%(asctime)s - %(levelname)s - %(message)s", description="Log message format")
+    log_datetime_format: str = Field(
+        str(getenv("LOG_DATETIME_FORMAT", "%Y-%m-%d %H:%M:%S")), description="Log datetime format"
+    )
 
     @field_validator("log_file_path", mode="before")
     @classmethod
@@ -111,39 +140,34 @@ class LoggingSettings(BaseModel):
 
 class FilePathConfig(BaseModel):
     """
-    Configuration model for file paths used in the application.
+    Configuration model for managing file and directory paths in the application.
 
-    This class defines the file path configurations for various components of the
-    BMRI monitoring automation system. All paths can be overridden using environment
-    variables.
+    This class validates and manages paths for firewall credentials, SSH daemon configuration,
+    and output directory. It automatically creates missing files and directories during validation.
 
     Attributes:
-        fw_creds (Path): Path to the firewall credentials CSV file.
-            Defaults to "./configs/fw_creds.csv".
-            Override with FW_CREDS_PATH environment variable.
-        sshd_config (Path): Path to the SSH daemon configuration file.
-            Defaults to "./configs/sshd_config".
-            Override with SSHD_CONFIG_PATH environment variable.
-        output_dir (Path): Path to the output directory for generated files.
-            Defaults to "./outputs/".
-            Override with OUTPUT_DIR_PATH environment variable.
+        fw_creds (FilePath): Path to the firewall credentials CSV file.
+            Defaults to './configs/fw_creds.csv' or the value of FW_CREDS_PATH environment variable.
+        sshd_config (FilePath): Path to the SSH daemon configuration file.
+            Defaults to './configs/sshd_config' or the value of SSHD_CONFIG_PATH environment variable.
+        output_dir (DirectoryPath): Path to the output directory.
+            Defaults to './outputs/' or the value of OUTPUT_DIR_PATH environment variable.
 
-    Example:
-        >>> config = FilePathConfig()
-        >>> print(config.fw_creds)
-        configs/fw_creds.csv
-
-        >>> # Using environment variables
-        >>> import os
-        >>> os.environ['FW_CREDS_PATH'] = '/custom/path/creds.csv'
-        >>> config = FilePathConfig()
-        >>> print(config.fw_creds)
-        /custom/path/creds.csv
+    Notes:
+        - All paths are validated before assignment
+        - Missing files and directories are automatically created during validation
+        - Environment variables take precedence over default values
     """
 
-    fw_creds: Path = Path(getenv("FW_CREDS_PATH", "./configs/fw_creds.csv"))
-    sshd_config: Path = Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config"))
-    output_dir: Path = Path(getenv("OUTPUT_DIR_PATH", "./outputs/"))
+    fw_creds: FilePath = Field(
+        Path(getenv("FW_CREDS_PATH", "./configs/fw_creds.csv")), description="Path to firewall credentials CSV file."
+    )
+    sshd_config: FilePath = Field(
+        Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config")), description="Path to SSH daemon configuration file."
+    )
+    output_dir: DirectoryPath = Field(
+        Path(getenv("OUTPUT_DIR_PATH", "./outputs/")), description="Path to output directory."
+    )
 
     @field_validator("fw_creds", "sshd_config", mode="before")
     @classmethod
@@ -166,40 +190,45 @@ class FilePathConfig(BaseModel):
 
 class EnvironmentsVariables(BaseModel):
     """
-    A Pydantic model that encapsulates all environment variables used in the application.
+    Pydantic model for managing application environment variables and configuration settings.
 
-    This class reads configuration from environment variables and provides strongly-typed
-    access to application settings including debug mode, logging level, database connection
-    settings, and logging configuration.
+    This class handles the loading and validation of environment variables from a .env file,
+    providing structured access to various configuration settings including debug mode,
+    logging configuration, file paths, and connection settings.
 
     Attributes:
-        debug_mode (bool): Enables debug mode when set to true. Reads from DEBUG_MODE
-            environment variable. Accepts values: "true", "1", "t" (case-insensitive).
-            Defaults to False.
-        log_level (str): Sets the application logging level. Reads from LOG_LEVEL
-            environment variable. Defaults to "INFO". Value is automatically converted
-            to uppercase.
-        verbose_mode (bool): User verbosity flag. Defaults to False.
-        file_paths (FilePathConfig): File path configuration settings encapsulated
-            in a FilePathConfig object.
-        conn (ConnectionSettings): Database connection configuration settings encapsulated
-            in a ConnectionSettings object.
-        logging (LoggingSettings): Application logging configuration settings encapsulated
-            in a LoggingSettings object.
+        debug_mode (StrictBool): Flag to enable debug mode. Reads from DEBUG_MODE environment
+            variable. Accepts "true", "1", or "t" (case-insensitive) as True values.
+        log_level (Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]): The logging
+            level for the application. Defaults to "INFO" if not specified.
+        verbose (StrictBool): User verbosity flag. When set to True, changes the debug
+            level to DEBUG. Defaults to False.
+        file_paths (FilePathConfig): Configuration object for file paths used by the
+            application. Created using default factory.
+        conn (ConnectionSettings): Configuration object for connection settings.
+            Created using default factory.
+        logging (LoggingSettings): Configuration object for logging settings.
+            Created using default factory.
 
     Example:
         >>> env = EnvironmentsVariables()
-        >>> env.debug_mode
+        >>> print(env.debug_mode)
         False
-        >>> env.log_level
+        >>> print(env.log_level)
         'INFO'
+
+    Note:
+        The .env file is expected to be located at the root of the project directory.
+        Environment variables are automatically loaded during initialization.
     """
 
-    debug_mode: bool = bool(getenv("DEBUG_MODE", "False").lower() in ("true", "1", "t"))
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default=getenv("LOG_LEVEL", "INFO").upper()
+    debug_mode: StrictBool = Field(
+        bool(getenv("DEBUG_MODE", "False").lower() in ("true", "1", "t")), description="Enables debug mode"
     )
-    verbose: Annotated[bool, "User verbosity flag"] = False
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="Logging level for the application"
+    )
+    verbose: StrictBool = Field(False, description="User verbosity flag, will change debug level to DEBUG if set")
     file_paths: FilePathConfig = Field(default_factory=FilePathConfig)
     conn: ConnectionSettings = Field(default_factory=ConnectionSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
@@ -207,3 +236,15 @@ class EnvironmentsVariables(BaseModel):
     def __init__(self, **data):
         load_dotenv(dotenv_path=Path("./.env").absolute())
         super().__init__(**data)
+
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def validate_log_level(cls, v: str | None) -> str:
+        """Validate and convert log level from environment variable."""
+        if v is None:
+            v = getenv("LOG_LEVEL", "INFO")
+        level = str(v).upper()
+        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if level not in valid_levels:
+            raise ValueError(f"log_level must be one of {valid_levels}")
+        return level
