@@ -4,7 +4,6 @@ from os import getenv
 from pathlib import Path
 from typing import Literal
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, DirectoryPath, Field, FilePath, PositiveInt, StrictBool, field_validator
 
 from helper.default_handler import create_filedir
@@ -115,7 +114,7 @@ class LoggingSettings(BaseModel):
     """
 
     log_file_path: FilePath = Field(
-        Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log")), description="Path to the log file"
+        Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log")).absolute(), description="Path to the log file"
     )
     log_rotate_time: str = Field(str(getenv("LOG_ROTATE_TIME", "w0")), description="Log rotation interval")
     log_backup_count: int = Field(
@@ -160,13 +159,15 @@ class FilePathConfig(BaseModel):
     """
 
     fw_creds: FilePath = Field(
-        Path(getenv("FW_CREDS_PATH", "./configs/fw_creds.csv")), description="Path to firewall credentials CSV file."
+        Path(getenv("FW_CREDS_PATH", "./configs/fw_creds.csv")).absolute(),
+        description="Path to firewall credentials CSV file.",
     )
     sshd_config: FilePath = Field(
-        Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config")), description="Path to SSH daemon configuration file."
+        Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config")).absolute(),
+        description="Path to SSH daemon configuration file.",
     )
     output_dir: DirectoryPath = Field(
-        Path(getenv("OUTPUT_DIR_PATH", "./outputs/")), description="Path to output directory."
+        Path(getenv("OUTPUT_DIR_PATH", "./outputs/")).absolute(), description="Path to output directory."
     )
 
     @field_validator("fw_creds", "sshd_config", mode="before")
@@ -233,10 +234,6 @@ class EnvironmentsVariables(BaseModel):
     conn: ConnectionSettings = Field(default_factory=ConnectionSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
-    def __init__(self, **data):
-        load_dotenv(dotenv_path=Path("./.env").absolute())
-        super().__init__(**data)
-
     @field_validator("log_level", mode="before")
     @classmethod
     def validate_log_level(cls, v: str | None) -> str:
@@ -244,7 +241,7 @@ class EnvironmentsVariables(BaseModel):
         if v is None:
             v = getenv("LOG_LEVEL", "INFO")
         level = str(v).upper()
-        valid_levels = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        valid_levels: set[str] = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
         if level not in valid_levels:
             raise ValueError(f"log_level must be one of {valid_levels}")
         return level

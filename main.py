@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Main entry point for bmri-monitoring-automation."""
 
 import csv
@@ -17,6 +18,7 @@ from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
 from helper.misc import split_equally
 from helper.print_info import info_request
+from libs.device_comm import iterate_connection
 from libs.file_creation import create_ssh_config
 from models.env import EnvironmentsVariables
 from models.main import Devices
@@ -24,7 +26,7 @@ from models.main import Devices
 env_vars = EnvironmentsVariables()
 
 
-def main():
+def main() -> None:
     """Ignore this, just a placeholder for main function."""
     log = logging.getLogger("mandiri-mona")
 
@@ -32,7 +34,7 @@ def main():
     if len(args.list) > 0:
         info_request(requests=args.list, console=console, env=env_vars)
         log.debug(f"Information for {args.list} displayed as requested.")
-        return 0
+        return
 
     # Read Firewall Credentials from CSV and Assign to Devices Model
     devices_creds: list[Devices] = []
@@ -46,6 +48,7 @@ def main():
                     username=row.get("username", ""),
                     password=row.get("password", ""),
                     hostname=row.get("hostname", None),
+                    monitored=row.get("monitored", "False").lower() == "true",
                 )
             )
     log.debug(f"Loaded {len(devices_creds)} firewall credentials from CSV.")
@@ -63,7 +66,11 @@ def main():
     threads: list[Thread] = []
     for idx, chunk in enumerate(chucked_devices):
         log.debug(f"Started thread {idx + 1} for {len(chunk)} devices")
-        thread = Thread()  # TODO: Replace with actual target function and args
+        thread = Thread(
+            target=iterate_connection,
+            args=(chunk, env_vars),
+            name=f"DeviceThread-{idx + 1}",
+        )
         threads.append(thread)
         thread.start()
 

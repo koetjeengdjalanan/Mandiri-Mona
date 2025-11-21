@@ -96,7 +96,7 @@ def initialize(missing: list[str]) -> Generator[Path, None, list[Path]]:
         yield fw_creds_path
         created_paths.append(fw_creds_path)
         with open(fw_creds_path, "w") as f:
-            f.write("device_type,ip,username,password\n")
+            f.write("device_type,ip,username,password,hostname,monitored\n")
     if "sshd_config" in missing:
         sshd_config_path = Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config"))
         sshd_config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)

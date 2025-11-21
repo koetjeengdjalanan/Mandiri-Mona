@@ -5,6 +5,7 @@ from logging.handlers import QueueListener
 from queue import Queue
 from typing import Generator, Literal
 
+from netmiko import BaseConnection, ConnectHandler
 from rich.console import Console
 
 from helper.logging import listener
@@ -53,3 +54,36 @@ def logging_context(
         yield log_listener
     finally:
         log_listener.stop()
+
+
+@contextmanager
+def ssh_connection(conn_vars: dict) -> Generator[BaseConnection, None, None]:
+    """
+    Context manager for SSH connections using Netmiko's ConnectHandler.
+
+    Args:
+        conn_vars (dict): Dictionary containing connection parameters for SSH connection.
+            Expected keys may include 'device_type', 'host', 'username', 'password', etc.
+
+    Yields:
+        BaseConnection: An active SSH connection object that can be used to execute commands.
+
+    Example:
+        >>> conn_params = {
+        ...     'device_type': 'cisco_ios',
+        ...     'host': '192.168.1.1',
+        ...     'username': 'admin',
+        ...     'password': 'password'
+        ... }
+        >>> with ssh_connection(conn_params) as conn:
+        ...     output = conn.send_command('show version')
+
+    Note:
+        The connection is automatically closed when exiting the context manager,
+        even if an exception occurs during the connection lifetime.
+    """
+    connection = ConnectHandler(**conn_vars)
+    try:
+        yield connection
+    finally:
+        connection.disconnect()
