@@ -95,9 +95,14 @@ def main() -> None:
                 log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
 
     # Summary report
-    log.info(f"Processing complete: {len(all_processed_devices)}/{total} devices succeeded")
-    if failed_devices:
-        log.warning(f"Failed devices ({len(failed_devices)}): {', '.join([d[0] for d in failed_devices])}")
+    with devices_lock:
+        success_count = len(all_processed_devices)
+        failed_count = len(failed_devices)
+        failed_names = [d[0] for d in failed_devices]
+    
+    log.info(f"Processing complete: {success_count}/{total} devices succeeded")
+    if failed_count > 0:
+        log.warning(f"Failed devices ({failed_count}): {', '.join(failed_names)}")
     update_fw_creds(file_path=env_vars.file_paths.fw_creds, devices=all_processed_devices)
 
     log.debug("Main function execution completed.")
