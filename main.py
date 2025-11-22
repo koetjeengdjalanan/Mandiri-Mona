@@ -6,8 +6,8 @@ import ipaddress
 import logging
 import queue
 import sys
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Thread
 
 from rich.console import Console
 from rich.progress import track
@@ -16,10 +16,9 @@ from config.argument_parser import ArgumentParser
 from config.contexts import logging_context
 from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
-from helper.misc import split_equally
 from helper.print_info import info_request
-from libs.device_comm import iterate_connection
-from libs.file_creation import create_ssh_config
+from libs.device_comm import connect_ssh
+from libs.file_creation import create_ssh_config, update_fw_creds
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -59,25 +58,42 @@ def main() -> None:
         current, total = tracking
         log.debug(f"Processed {current}/{total} devices for SSH config.")
 
-    # Split Devices into Chunks for Multithreading
-    chucked_devices: list[list[Devices]] = split_equally(list=devices_creds, n=env_vars.conn.num_of_threads)
+    # Process Devices with ThreadPoolExecutor for Better Concurrency
+    all_processed_devices: list[Devices] = []
+    failed_devices: list[tuple[str, str]] = []
 
-    # Start Threads for Device Processing
-    threads: list[Thread] = []
-    for idx, chunk in enumerate(chucked_devices):
-        log.debug(f"Started thread {idx + 1} for {len(chunk)} devices")
-        thread = Thread(
-            target=iterate_connection,
-            args=(chunk, env_vars),
-            name=f"DeviceThread-{idx + 1}",
-        )
-        threads.append(thread)
-        thread.start()
+    log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
+    with ThreadPoolExecutor(max_workers=env_vars.conn.num_of_threads, thread_name_prefix="Mona_SSH-agent") as executor:
+        # Submit individual device connections instead of chunks for better load balancing
+        future_to_device: dict[Future, Devices] = {
+            executor.submit(connect_ssh, device, env_vars): device for device in devices_creds
+        }
 
-    for thread in threads:
-        thread.join()
+        completed = 0
+        total = len(devices_creds)
 
-    print("Hello from bmri-monitoring-automation!")
+        for future in as_completed(future_to_device):
+            device = future_to_device[future]
+            completed += 1
+            try:
+                dev, res = future.result()
+                # Write output with thread-safe file handling
+                output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
+                with open(output_file, "a") as f:
+                    f.write(res)
+                all_processed_devices.append(dev)
+                log.info(f"Completed processing for device {dev.hostname} ({completed}/{total})")
+            except Exception as e:
+                failed_devices.append((str(device.hostname or device.ip), str(e)))
+                log.error(f"Failed processing for device {device.hostname or device.ip} ({completed}/{total}): {e}")
+
+    # Summary report
+    log.info(f"Processing complete: {len(all_processed_devices)}/{total} devices succeeded")
+    if failed_devices:
+        log.warning(f"Failed devices ({len(failed_devices)}): {', '.join([d[0] for d in failed_devices])}")
+    update_fw_creds(file_path=env_vars.file_paths.fw_creds, devices=all_processed_devices)
+
+    log.debug("Main function execution completed.")
 
 
 if __name__ == "__main__":

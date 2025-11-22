@@ -37,3 +37,8 @@ class Devices(BaseModel):
     password: str = Field(..., description="Password for device access.")
     hostname: Optional[str] = Field(None, description="Optional hostname of the device.")
     monitored: StrictBool = Field(default=False, description="Indicates if the device packet descriptor is monitored.")
+
+    @property
+    def as_csv_line(self) -> str:
+        """Return device information as a CSV formatted line."""
+        return f"{self.device_type},{self.ip},{self.username},{self.password},{self.hostname},{self.monitored}\n"
