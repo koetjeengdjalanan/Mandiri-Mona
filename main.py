@@ -8,6 +8,7 @@ import queue
 import sys
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -92,7 +93,11 @@ def main() -> None:
                     failed_devices.append((str(device.hostname or device.ip), str(e)))
                     completed += 1
                     current = completed  # Capture count inside lock for consistent logging
-                log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
+                log.error(
+                    f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}",
+                    exc_info=True,
+                    stack_info=True,
+                )
 
     # Summary report
     with devices_lock:
@@ -163,6 +168,7 @@ if __name__ == "__main__":
         log_queue=log_q,
         level=env_vars.log_level,
     ) as log_listener:
+        start_time: datetime = datetime.now()
         logging_helper.worker_logger(
             log_queue=log_q,
             log_level=env_vars.log_level,
@@ -175,4 +181,4 @@ if __name__ == "__main__":
         except Exception as e:
             log.exception(f"An unhandled exception occurred: {e}", exc_info=True)
         finally:
-            log.info("Mandiri MONA Finished Execution\n")
+            log.info(f"Mandiri MONA Finished Execution {datetime.now() - start_time}\n")
