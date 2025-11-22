@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import queue
 import sys
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -61,6 +62,7 @@ def main() -> None:
     # Process Devices with ThreadPoolExecutor for Better Concurrency
     all_processed_devices: list[Devices] = []
     failed_devices: list[tuple[str, str]] = []
+    devices_lock = threading.Lock()  # Lock for thread-safe list operations
 
     log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
     with ThreadPoolExecutor(max_workers=env_vars.conn.num_of_threads, thread_name_prefix="Mona_SSH-agent") as executor:
@@ -81,10 +83,12 @@ def main() -> None:
                 output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
                 with open(output_file, "a") as f:
                     f.write(res)
-                all_processed_devices.append(dev)
+                with devices_lock:
+                    all_processed_devices.append(dev)
                 log.info(f"Completed processing for device {dev.hostname} ({completed}/{total})")
             except Exception as e:
-                failed_devices.append((str(device.hostname or device.ip), str(e)))
+                with devices_lock:
+                    failed_devices.append((str(device.hostname or device.ip), str(e)))
                 log.error(f"Failed processing for device {device.hostname or device.ip} ({completed}/{total}): {e}")
 
     # Summary report
