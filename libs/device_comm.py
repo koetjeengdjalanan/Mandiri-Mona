@@ -181,9 +181,11 @@ def _connect_ssh_impl(device: Devices, env_vars: EnvironmentsVariables) -> tuple
         for command, func in commands:
             LOGGER.debug(f"Executing command on {device.hostname or device.ip}: {command}")
             con_res: str | list | dict = conn_manager.send_command(command)
+            LOGGER.debug(f"Raw output for command '{command}' on {device.hostname or device.ip}:\n{con_res}\n")
             if func is not None:
                 con_res = func(str(con_res))
             final_res += f"{divider} {command} {divider}\n{con_res}\n\n"
+            LOGGER.debug(f"Processed output for command '{command}' on {device.hostname or device.ip}:\n{con_res}\n")
             LOGGER.info(f"Command executed successfully on {device.hostname or device.ip}: {command}")
 
     LOGGER.debug(f"Disconnected from device {device.hostname or device.ip}")
@@ -208,11 +210,14 @@ def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devic
     Raises:
         Exception: Re-raises any exception after configured retry attempts.
     """
+    retry_exceptions: tuple[type, ...] = (
+        (Exception,) if env_vars.debug_mode else (TimeoutError, NetmikoTimeoutException)
+    )
     # Create a retry decorator with dynamic max_retry from configuration
     retry_decorator = retry(
         stop=stop_after_attempt(env_vars.conn.max_retry),
         wait=wait_exponential(multiplier=1, min=2, max=5),
-        retry=retry_if_exception_type((TimeoutError, NetmikoTimeoutException)),
+        retry=retry_if_exception_type(retry_exceptions),
         before_sleep=before_sleep_log(LOGGER, logging.WARNING),
         reraise=True,
     )
