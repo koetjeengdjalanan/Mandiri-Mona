@@ -97,7 +97,7 @@ def process_resource_utilization(output: str) -> str:
     expressions: dict[str, str] = {
         "chunk": r"(DP\s+[^:]+:(?:(?!DP\s+)[^\n]*\n)*)",
         "dp_name": r"^(DP\s[\w]+)",
-        "packet": r"^(.*\:)\s*\n\s*((?:\d+\s+)+\d+)$",
+        "packet": r"^(.*\:)\s*\n\s*((?:\d+\s+)+\d+)\s?$",
     }
 
     res: str = ""
