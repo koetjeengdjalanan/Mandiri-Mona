@@ -63,15 +63,23 @@ def update_fw_creds(file_path: Path, devices: list[Devices]) -> None:
 
         # Build new content with only changed lines
         new_lines = [header]
-        for device in devices:
-            new_line = device.as_csv_line
-            device_ip = str(device.ip)
-
-            # Only add to write list if line is new or changed
-            if device_ip not in existing_devices or existing_devices[device_ip] != new_line:
-                new_lines.append(new_line)
-            else:
-                new_lines.append(existing_devices[device_ip])
+        # Build a mapping from device IP to device object for quick lookup
+        device_map = {str(device.ip): device for device in devices}
+        # Iterate over all existing lines (excluding header)
+        for line in lines[1:]:
+            parts = line.strip().split(",")
+            if len(parts) >= 2:
+                ip = parts[1]
+                if ip in device_map:
+                    # Update line for processed device
+                    new_lines.append(device_map[ip].as_csv_line)
+                else:
+                    # Preserve original line for unprocessed device
+                    new_lines.append(line)
+        # Add any new devices not already in the file
+        for ip, device in device_map.items():
+            if ip not in existing_devices:
+                new_lines.append(device.as_csv_line)
 
         # Write only if content has changed
         new_content = "".join(new_lines)

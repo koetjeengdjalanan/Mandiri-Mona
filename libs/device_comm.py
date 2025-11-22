@@ -166,7 +166,7 @@ def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devic
         "password": device.password,
         "ssh_config_file": str(env_vars.file_paths.sshd_config),
         "conn_timeout": env_vars.conn.conn_timeout,
-        "read_timeout_override": env_vars.conn.conn_timeout,
+        "read_timeout_override": env_vars.conn.read_timeout_override,
     }
     commands: Iterable[tuple[str, Callable | None]] = [
         ("show system state | match 1minavg", None),

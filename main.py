@@ -26,7 +26,7 @@ env_vars = EnvironmentsVariables()
 
 
 def main() -> None:
-    """Ignore this, just a placeholder for main function."""
+    """Main function and entry point to execute the monitoring automation."""
     log = logging.getLogger("mandiri-mona")
 
     # Printing Info if Requested

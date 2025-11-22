@@ -113,7 +113,7 @@ class LoggingSettings(BaseModel):
         mandiri-MONA.log
     """
 
-    log_file_path: FilePath = Field(
+    log_file_path: Path = Field(
         Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log")).absolute(), description="Path to the log file"
     )
     log_rotate_time: str = Field(str(getenv("LOG_ROTATE_TIME", "w0")), description="Log rotation interval")
