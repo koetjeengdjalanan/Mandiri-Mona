@@ -16,7 +16,7 @@ from models.env import LoggingSettings
 def logging_context(
     settings: LoggingSettings,
     console: Console,
-    log_queue: Queue = Queue(maxsize=-1),
+    log_queue: Queue,
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO",
 ) -> Generator[QueueListener, None, None]:
     """

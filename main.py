@@ -100,7 +100,7 @@ def main() -> None:
         failed_count = len(failed_devices)
         failed_names = [d[0] for d in failed_devices]
         processed_devices_copy = all_processed_devices.copy()
-    
+
     log.info(f"Processing complete: {success_count}/{total} devices succeeded")
     if failed_count > 0:
         log.warning(f"Failed devices ({failed_count}): {', '.join(failed_names)}")

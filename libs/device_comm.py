@@ -117,15 +117,7 @@ def process_resource_utilization(output: str) -> str:
     return res
 
 
-# TODO: Log for every retry failed attempt with attempt number and exception
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=5),
-    retry=retry_if_exception_type((TimeoutError, NetmikoTimeoutException)),
-    before_sleep=before_sleep_log(LOGGER, logging.WARNING),
-    reraise=True,
-)
-def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devices, str]:
+def _connect_ssh_impl(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devices, str]:
     """
     Establishes an SSH connection to a network device and executes monitoring commands.
 
@@ -145,7 +137,7 @@ def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devic
             - A formatted string containing all command outputs separated by dividers
 
     Raises:
-        Exception: Re-raises any exception after 3 retry attempts with exponential backoff
+        Exception: Re-raises any exception after configured retry attempts with exponential backoff
             (2-5 seconds between attempts). Individual command failures are logged but
             don't stop execution of remaining commands.
 
@@ -196,6 +188,38 @@ def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devic
 
     LOGGER.debug(f"Disconnected from device {device.hostname or device.ip}")
     return device, final_res
+
+
+def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devices, str]:
+    """
+    Establishes an SSH connection to a network device with configurable retry logic.
+
+    This wrapper function applies dynamic retry configuration based on the max_retry
+    setting from environment variables, then delegates to the implementation function.
+
+    Args:
+        device (Devices): A Devices object containing device connection information.
+        env_vars (EnvironmentsVariables): Configuration object containing max_retry and
+            other connection settings.
+
+    Returns:
+        tuple[Devices, str]: A tuple containing the updated Devices object and command outputs.
+
+    Raises:
+        Exception: Re-raises any exception after configured retry attempts.
+    """
+    # Create a retry decorator with dynamic max_retry from configuration
+    retry_decorator = retry(
+        stop=stop_after_attempt(env_vars.conn.max_retry),
+        wait=wait_exponential(multiplier=1, min=2, max=5),
+        retry=retry_if_exception_type((TimeoutError, NetmikoTimeoutException)),
+        before_sleep=before_sleep_log(LOGGER, logging.WARNING),
+        reraise=True,
+    )
+
+    # Apply the retry decorator to the implementation function and execute
+    retrying_func = retry_decorator(_connect_ssh_impl)
+    return retrying_func(device, env_vars)
 
 
 def iterate_connection(devices: list[Devices], env_vars: EnvironmentsVariables) -> list[Devices]:
