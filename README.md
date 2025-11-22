@@ -37,29 +37,27 @@ Mandiri-Mona is a Python-based automation tool designed for efficient monitoring
 - `uv` package manager (recommended) or `pip`
 
 ### Setup
-\`\`\`bash
+```bash
 # Install uv package manager
 pip install uv
-
-# Sync dependencies
 uv sync
 
 # Or using pip
 pip install -r requirements.txt
-\`\`\`
+```
 
 ## Configuration
 
 ### 1. Environment Setup
 Copy `.env.example` to `.env` and configure settings:
-\`\`\`bash
+```bash
 cp .env.example .env
-\`\`\`
+```
 
 ### 2. Environment Variables
 Edit `.env` with your configuration:
 
-\`\`\`ini
+```ini
 # Debug and Logging Configuration
 DEBUG_MODE=False
 LOG_LEVEL=INFO
@@ -80,12 +78,12 @@ LOG_DATETIME_FORMAT=%Y-%m-%d %H:%M:%S
 FW_CREDS_PATH=./configs/fw_creds.csv      # Device credentials CSV
 SSHD_CONFIG_PATH=./configs/sshd_config    # SSH configuration file
 OUTPUT_DIR_PATH=./outputs/                # Output directory for device logs
-\`\`\`
+```
 
 ### 3. Initialize Required Files
-\`\`\`bash
+```bash
 python main.py --init
-\`\`\`
+```
 
 This creates:
 - `./configs/fw_creds.csv` - Device credentials file
@@ -95,22 +93,22 @@ This creates:
 
 ### 4. Device Configuration
 Edit `./configs/fw_creds.csv` with your device information:
-\`\`\`csv
+```csv
 device_type,ip,username,password,hostname,monitored
-paloalto_panos,192.168.1.1,admin,password123,,True
-paloalto_panos,192.168.1.2,admin,password456,,False
-\`\`\`
+paloalto_panos,192.168.1.1,admin,password123,some-device-01,True
+paloalto_panos,192.168.1.2,admin,password456,some-device-02,False
+```
 
 ## Usage
 
 ### Basic Usage
-\`\`\`bash
+```bash
 python main.py
-\`\`\`
+```
 
 ### Command-Line Options
 
-\`\`\`bash
+```bash
 # Display help
 python main.py --help
 
@@ -137,7 +135,10 @@ python main.py --list all
 
 # Display version
 python main.py --version
-\`\`\`
+```
+
+> [!CAUTION]
+> Never use `--debug` on production cron job! this will inflate your log file and make your life difficult!
 
 ### Monitoring Commands Executed
 
@@ -160,14 +161,14 @@ The tool automatically executes the following commands on each device:
 
 ### Device Output Format
 Each device log contains timestamped command outputs:
-\`\`\`
+```
 ========================= show system info | match hostname =========================
 firewall-01
 
 ========================= show system state | match 1minavg =========================
 1minavg: 0.00
 ...
-\`\`\`
+```
 
 ## Development
 
@@ -175,7 +176,7 @@ firewall-01
 
 The project includes several code quality tools:
 
-\`\`\`bash
+```bash
 # Format code with black
 black .
 
@@ -187,19 +188,19 @@ ruff check .
 
 # Run pre-commit hooks
 pre-commit run --all-files
-\`\`\`
+```
 
 ### Testing
-\`\`\`bash
+```bash
 # Run tests with pytest
 pytest
 
 # Run tests with coverage
 pytest --cov=.
-\`\`\`
+```
 
 ### Project Structure
-\`\`\`
+```
 mandiri-mona/
 ├── config/              # Configuration modules
 │   ├── argument_parser.py  # CLI argument parsing
@@ -218,7 +219,7 @@ mandiri-mona/
 ├── main.py              # Application entry point
 ├── pyproject.toml       # Project configuration
 └── README.md            # This file
-\`\`\`
+```
 
 ## Requirements
 - Python 3.12+
