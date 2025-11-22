@@ -76,7 +76,6 @@ def main() -> None:
 
         for future in as_completed(future_to_device):
             device = future_to_device[future]
-            completed += 1
             try:
                 dev, res = future.result()
                 # Write output with thread-safe file handling
@@ -85,11 +84,15 @@ def main() -> None:
                     f.write(res)
                 with devices_lock:
                     all_processed_devices.append(dev)
-                log.info(f"Completed processing for device {dev.hostname} ({completed}/{total})")
+                    completed += 1
+                    current_completed = completed
+                log.info(f"Completed processing for device {dev.hostname} ({current_completed}/{total})")
             except Exception as e:
                 with devices_lock:
                     failed_devices.append((str(device.hostname or device.ip), str(e)))
-                log.error(f"Failed processing for device {device.hostname or device.ip} ({completed}/{total}): {e}")
+                    completed += 1
+                    current_completed = completed
+                log.error(f"Failed processing for device {device.hostname or device.ip} ({current_completed}/{total}): {e}")
 
     # Summary report
     log.info(f"Processing complete: {len(all_processed_devices)}/{total} devices succeeded")
