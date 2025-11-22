@@ -6,6 +6,7 @@ import ipaddress
 import logging
 import queue
 import sys
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -61,6 +62,7 @@ def main() -> None:
     # Process Devices with ThreadPoolExecutor for Better Concurrency
     all_processed_devices: list[Devices] = []
     failed_devices: list[tuple[str, str]] = []
+    devices_lock = threading.Lock()  # Lock for thread-safe list operations
 
     log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
     with ThreadPoolExecutor(max_workers=env_vars.conn.num_of_threads, thread_name_prefix="Mona_SSH-agent") as executor:
@@ -74,24 +76,35 @@ def main() -> None:
 
         for future in as_completed(future_to_device):
             device = future_to_device[future]
-            completed += 1
             try:
                 dev, res = future.result()
                 # Write output with thread-safe file handling
                 output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
                 with open(output_file, "a") as f:
                     f.write(res)
-                all_processed_devices.append(dev)
-                log.info(f"Completed processing for device {dev.hostname} ({completed}/{total})")
+                with devices_lock:
+                    all_processed_devices.append(dev)
+                    completed += 1
+                    current = completed  # Capture count inside lock for consistent logging
+                log.info(f"Completed processing for device {dev.hostname} ({current}/{total})")
             except Exception as e:
-                failed_devices.append((str(device.hostname or device.ip), str(e)))
-                log.error(f"Failed processing for device {device.hostname or device.ip} ({completed}/{total}): {e}")
+                with devices_lock:
+                    failed_devices.append((str(device.hostname or device.ip), str(e)))
+                    completed += 1
+                    current = completed  # Capture count inside lock for consistent logging
+                log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
 
     # Summary report
-    log.info(f"Processing complete: {len(all_processed_devices)}/{total} devices succeeded")
-    if failed_devices:
-        log.warning(f"Failed devices ({len(failed_devices)}): {', '.join([d[0] for d in failed_devices])}")
-    update_fw_creds(file_path=env_vars.file_paths.fw_creds, devices=all_processed_devices)
+    with devices_lock:
+        success_count = len(all_processed_devices)
+        failed_count = len(failed_devices)
+        failed_names = [d[0] for d in failed_devices]
+        processed_devices_copy = all_processed_devices.copy()
+    
+    log.info(f"Processing complete: {success_count}/{total} devices succeeded")
+    if failed_count > 0:
+        log.warning(f"Failed devices ({failed_count}): {', '.join(failed_names)}")
+    update_fw_creds(file_path=env_vars.file_paths.fw_creds, devices=processed_devices_copy)
 
     log.debug("Main function execution completed.")
 
