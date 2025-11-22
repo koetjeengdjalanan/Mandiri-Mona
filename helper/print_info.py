@@ -7,6 +7,8 @@ from rich.table import Table
 
 from models.env import EnvironmentsVariables
 
+__all__: list[str] = ["info_request"]
+
 
 def info_request(requests: list[str], console: Console, env: EnvironmentsVariables) -> None:
     """
@@ -35,18 +37,27 @@ def info_request(requests: list[str], console: Console, env: EnvironmentsVariabl
     choices = ["devices", "env"] if "all" in requests else requests
     if "devices" in choices:
         table = Table(title="Device Information")
-        table.add_column("Hostname", style="cyan", no_wrap=True)
-        table.add_column("IP Address", style="magenta")
-        table.add_column("Username", style="green")
-        table.add_column("Password", style="yellow")
+        table.add_column(header="Device Type", style="cyan", no_wrap=True)
+        table.add_column(header="IP Address", style="magenta")
+        table.add_column(header="Username", style="green")
+        table.add_column(header="Password", style="yellow")
+        table.add_column(header="Hostname", style="white")
+        table.add_column(header="Monitored", style="red")
 
         with open(env.file_paths.fw_creds, "r") as f:
             reader = DictReader(f)
             for row in reader:
-                if not all(k in row for k in ["device_type", "host", "username", "password"]):
+                if not all(k in row for k in ["device_type", "ip", "username", "password", "hostname", "monitored"]):
                     console.print(f"[red]Skipping malformed row:[/red] {row}")
                     continue
-                table.add_row(row["device_type"], row["host"], row["username"], row["password"])
+                table.add_row(
+                    row.get("device_type", ""),
+                    row.get("ip", ""),
+                    row.get("username", ""),
+                    row.get("password", ""),
+                    row.get("hostname", ""),
+                    row.get("monitored", "False"),
+                )
         console.print(table)
     if "env" in choices:
         console.rule(title="[bold]Environment Variables:[/bold]", style="blue", characters="=")

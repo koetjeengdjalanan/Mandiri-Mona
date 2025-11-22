@@ -4,8 +4,10 @@ from os import getenv
 from pathlib import Path
 from typing import Generator
 
+__all__: list[str] = ["create_env", "initialize", "isallexists"]
 
-def isallexists(paths: list[Path, str]) -> list[list[bool | str | None]]:
+
+def isallexists(paths: list[tuple[Path, str]]) -> list[list[bool | str | None]]:
     """
     Check if all specified paths exist and match their expected types.
 
@@ -80,7 +82,7 @@ def initialize(missing: list[str]) -> Generator[Path, None, list[Path]]:
         - Files are created with mode 0o644 (rw-r--r--)
         - The fw_creds.csv file is initialized with a header row
     """
-    created_paths = []
+    created_paths: list[Path] = []
     if "logs" in missing:
         log_path = Path(getenv("LOG_FILE_PATH", "./mandiri-MONA.log"))
         log_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -94,7 +96,7 @@ def initialize(missing: list[str]) -> Generator[Path, None, list[Path]]:
         yield fw_creds_path
         created_paths.append(fw_creds_path)
         with open(fw_creds_path, "w") as f:
-            f.write("device_type,host,username,password\n")
+            f.write("device_type,ip,username,password,hostname,monitored\n")
     if "sshd_config" in missing:
         sshd_config_path = Path(getenv("SSHD_CONFIG_PATH", "./configs/sshd_config"))
         sshd_config_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
@@ -155,6 +157,7 @@ FW_CREDS_PATH=./configs/fw_creds.csv
 SSHD_CONFIG_PATH=./configs/sshd_config
 OUTPUT_DIR_PATH=./outputs/
 """
-    with open(Path(getenv("MANDIRI_MONA_ENV", Path(__file__).parent.parent.resolve().joinpath(".env"))), "w") as f:
+    env_path = Path(getenv("MANDIRI_MONA_ENV") or Path(__file__).resolve().parents[1] / ".env")
+    with open(env_path, "w") as f:
         f.write(example_env)
     return True

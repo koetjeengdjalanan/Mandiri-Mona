@@ -1,33 +1,112 @@
+#!/usr/bin/env python3
 """Main entry point for bmri-monitoring-automation."""
 
+import csv
+import ipaddress
 import logging
 import queue
 import sys
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from rich.console import Console
+from rich.progress import track
 
 from config.argument_parser import ArgumentParser
+from config.contexts import logging_context
 from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
 from helper.print_info import info_request
+from libs.device_comm import connect_ssh
+from libs.file_creation import create_ssh_config, update_fw_creds
 from models.env import EnvironmentsVariables
+from models.main import Devices
 
 env_vars = EnvironmentsVariables()
 
 
-def main():
-    """Ignore this, just a placeholder for main function."""
+def main() -> None:
+    """Main function and entry point to execute the monitoring automation."""
     log = logging.getLogger("mandiri-mona")
-    # console.print(args)
 
     # Printing Info if Requested
     if len(args.list) > 0:
         info_request(requests=args.list, console=console, env=env_vars)
         log.debug(f"Information for {args.list} displayed as requested.")
-        return 0
+        return
 
-    print("Hello from bmri-monitoring-automation!")
+    # Read Firewall Credentials from CSV and Assign to Devices Model
+    devices_creds: list[Devices] = []
+    with open(file=env_vars.file_paths.fw_creds, mode="r") as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            devices_creds.append(
+                Devices(
+                    device_type=row.get("device_type", ""),
+                    ip=ipaddress.IPv4Address(row.get("ip", "")),
+                    username=row.get("username", ""),
+                    password=row.get("password", ""),
+                    hostname=row.get("hostname", None),
+                    monitored=row.get("monitored", "False").lower() == "true",
+                )
+            )
+    log.debug(f"Loaded {len(devices_creds)} firewall credentials from CSV.")
+    for tracking in track(
+        create_ssh_config(file_path=env_vars.file_paths.sshd_config, devices=devices_creds),
+        description="Creating SSH Config...",
+    ):
+        current, total = tracking
+        log.debug(f"Processed {current}/{total} devices for SSH config.")
+
+    # Process Devices with ThreadPoolExecutor for Better Concurrency
+    all_processed_devices: list[Devices] = []
+    failed_devices: list[tuple[str, str]] = []
+    devices_lock = threading.Lock()  # Lock for thread-safe list operations
+
+    log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
+    with ThreadPoolExecutor(max_workers=env_vars.conn.num_of_threads, thread_name_prefix="Mona_SSH-agent") as executor:
+        # Submit individual device connections instead of chunks for better load balancing
+        future_to_device: dict[Future, Devices] = {
+            executor.submit(connect_ssh, device, env_vars): device for device in devices_creds
+        }
+
+        completed = 0
+        total = len(devices_creds)
+
+        for future in as_completed(future_to_device):
+            device = future_to_device[future]
+            try:
+                dev, res = future.result()
+                # Write output with thread-safe file handling
+                output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
+                with open(output_file, "a") as f:
+                    f.write(res)
+                with devices_lock:
+                    all_processed_devices.append(dev)
+                    completed += 1
+                    current = completed  # Capture count inside lock for consistent logging
+                log.info(f"Completed processing for device {dev.hostname} ({current}/{total})")
+            except Exception as e:
+                with devices_lock:
+                    failed_devices.append((str(device.hostname or device.ip), str(e)))
+                    completed += 1
+                    current = completed  # Capture count inside lock for consistent logging
+                log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
+
+    # Summary report
+    with devices_lock:
+        success_count = len(all_processed_devices)
+        failed_count = len(failed_devices)
+        failed_names = [d[0] for d in failed_devices]
+        processed_devices_copy = all_processed_devices.copy()
+
+    log.info(f"Processing complete: {success_count}/{total} devices succeeded")
+    if failed_count > 0:
+        log.warning(f"Failed devices ({failed_count}): {', '.join(failed_names)}")
+    update_fw_creds(file_path=env_vars.file_paths.fw_creds, devices=processed_devices_copy)
+
+    log.debug("Main function execution completed.")
 
 
 if __name__ == "__main__":
@@ -77,17 +156,23 @@ if __name__ == "__main__":
             console.print("[yellow]All required files and directories already exist.[/yellow]")
         sys.exit(0)
 
-    # TODO: Create a Context Manager!
-    log_q = queue.Queue(maxsize=-1)
-    listener = logging_helper.listener(log_q, env_vars.logging, console=console, level=env_vars.log_level)
-    listener.start()
+    log_q: queue.Queue = queue.Queue(maxsize=-1)
+    with logging_context(
+        settings=env_vars.logging,
+        console=console,
+        log_queue=log_q,
+        level=env_vars.log_level,
+    ) as log_listener:
+        logging_helper.worker_logger(
+            log_queue=log_q,
+            log_level=env_vars.log_level,
+        )
+        log = logging.getLogger("mandiri-mona")
+        log.info("Starting Mandiri MONA Application")
 
-    logging_helper.worker_logger(log_q, log_level=env_vars.log_level)
-    log = logging.getLogger("mandiri-mona")
-    log.info("Starting Mandiri MONA Application")
-
-    try:
-        main()
-    finally:
-        log.info("Mandiri MONA Finished Execution")
-        listener.stop()
+        try:
+            main()
+        except Exception as e:
+            log.exception(f"An unhandled exception occurred: {e}", exc_info=True)
+        finally:
+            log.info("Mandiri MONA Finished Execution\n")
