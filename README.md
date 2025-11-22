@@ -222,14 +222,14 @@ mandiri-mona/
 
 ## Requirements
 - Python 3.12+
-- Dependencies:
-  - `netmiko>=4.6.0` - Network device SSH communication
-  - `pydantic>=2.12.4` - Data validation
-  - `python-dotenv>=1.2.1` - Environment variable management
-  - `rich>=14.2.0` - Terminal formatting
-  - `tenacity>=9.1.2` - Retry logic
+- Key dependencies:
+  - `netmiko` - Network device SSH communication
+  - `pydantic` - Data validation
+  - `python-dotenv` - Environment variable management
+  - `rich` - Terminal formatting
+  - `tenacity` - Retry logic
 
-See `pyproject.toml` for complete dependency list.
+See `pyproject.toml` for complete dependency list and version requirements.
 
 ## License
 
