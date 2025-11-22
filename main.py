@@ -85,12 +85,14 @@ def main() -> None:
                 with devices_lock:
                     all_processed_devices.append(dev)
                     completed += 1
-                log.info(f"Completed processing for device {dev.hostname} ({completed}/{total})")
+                    current = completed  # Capture count inside lock for consistent logging
+                log.info(f"Completed processing for device {dev.hostname} ({current}/{total})")
             except Exception as e:
                 with devices_lock:
                     failed_devices.append((str(device.hostname or device.ip), str(e)))
                     completed += 1
-                log.error(f"Failed processing for device {device.hostname or device.ip} ({completed}/{total}): {e}")
+                    current = completed  # Capture count inside lock for consistent logging
+                log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
 
     # Summary report
     log.info(f"Processing complete: {len(all_processed_devices)}/{total} devices succeeded")
