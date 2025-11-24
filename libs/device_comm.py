@@ -34,7 +34,7 @@ def process_high_availability_state(output: str) -> str:
         >>> process_high_availability_state(output)
         'Active'
     """
-    return output.splitlines()[0]
+    return output.strip("\n").splitlines()[0]
 
 
 def process_system_info(output: str) -> str:
