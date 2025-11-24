@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/data/mandiri-mona/.venv/bin/python3.12
 """Main entry point for bmri-monitoring-automation."""
 
 import csv
@@ -126,7 +126,7 @@ if __name__ == "__main__":
     env_vars.verbose = args.verbose
 
     try:
-        env_file = Path("./.env").absolute()
+        env_file = Path(__file__).parent.joinpath(".env").absolute()
         if not env_file.exists():
             create_env()
             raise FileNotFoundError(".env file created, please review it and restart the application.")
