@@ -176,7 +176,7 @@ def _connect_ssh_impl(device: Devices, env_vars: EnvironmentsVariables) -> tuple
             conn_manager.send_command(command_string="show system info | match hostname", expect_string=r">")
         ).strip("\n")
         device.hostname = hostname.strip().split(" ")[-1]
-        final_res += f"{divider} show system info | match hostname {divider}\n{device.hostname}\n\n"
+        final_res += f"{divider} show system info | match hostname {divider}\nhostname: {device.hostname}\n\n"
 
         for command, func in commands:
             LOGGER.debug(f"Executing command on {device.hostname or device.ip}: {command}")
