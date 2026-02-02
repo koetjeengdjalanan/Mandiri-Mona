@@ -5,6 +5,8 @@ import csv
 import ipaddress
 import logging
 import queue
+import signal
+import subprocess
 import sys
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -160,18 +162,14 @@ if __name__ == "__main__":
         if status["running"]:
             console.print(f"[green]Daemon is running[/green] (PID: {status['pid']})")
             console.print("[cyan]Streaming logs (press Ctrl+C to stop)...[/cyan]\n")
-            
-            # Tail the log file and show live updates
-            import subprocess
-            import signal
-            
+
             log_file = env_vars.logging.log_file_path
-            
+
             # Check if log file exists
             if not log_file.exists():
                 console.print(f"[yellow]Log file not found: {log_file}[/yellow]")
                 sys.exit(0)
-            
+
             try:
                 # Use tail -f to follow the log file
                 process = subprocess.Popen(
@@ -179,21 +177,21 @@ if __name__ == "__main__":
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    bufsize=1
+                    bufsize=1,
                 )
-                
+
                 # Handle Ctrl+C gracefully
                 def signal_handler(sig, frame):
                     process.terminate()
                     console.print("\n[yellow]Stopped streaming logs[/yellow]")
                     sys.exit(0)
-                
+
                 signal.signal(signal.SIGINT, signal_handler)
-                
-                # Stream the output
+
+                # Stream the output using console for consistency
                 for line in process.stdout:
-                    print(line, end='')
-                    
+                    console.print(line, end="")
+
             except Exception as e:
                 console.print(f"[red]Error streaming logs: {e}[/red]")
                 sys.exit(1)

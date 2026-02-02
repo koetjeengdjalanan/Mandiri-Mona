@@ -452,7 +452,10 @@ paloalto_panos,192.168.1.2,admin,pass456,device2,false
             csv_path.unlink()
 
     def test_load_devices_with_missing_fields(self):
-        """Test loading devices with optional fields missing."""
+        """Test loading devices with optional fields missing.
+        
+        Note: CSV empty fields become empty strings, not None.
+        """
         csv_content = """device_type,ip,username,password,hostname,monitored
 paloalto_panos,192.168.1.1,admin,pass123,,
 """
@@ -464,8 +467,8 @@ paloalto_panos,192.168.1.1,admin,pass123,,
             devices = load_devices_from_csv(csv_path)
 
             assert len(devices) == 1
-            # Empty string in CSV becomes empty string, not None
-            assert devices[0].hostname == '' or devices[0].hostname is None
+            # Empty CSV field becomes empty string
+            assert devices[0].hostname == ''
             assert devices[0].monitored is False  # Default value
         finally:
             csv_path.unlink()
