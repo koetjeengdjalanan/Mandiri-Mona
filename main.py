@@ -36,6 +36,11 @@ def main() -> None:
         return
 
     log.debug(f"Loaded {len(devices_creds)} firewall credentials from CSV.")
+
+    # Process Devices with ThreadPoolExecutor for Better Concurrency
+    all_processed_devices: list[Devices] = []
+    failed_devices: list[tuple[str, str]] = []
+
     for tracking in track(
         create_ssh_config(file_path=env_vars.file_paths.sshd_config, devices=devices_creds),
         description="Creating SSH Config...",
@@ -43,9 +48,6 @@ def main() -> None:
         current, total = tracking
         log.debug(f"Processed {current}/{total} devices for SSH config.")
 
-    # Process Devices with ThreadPoolExecutor for Better Concurrency
-    all_processed_devices: list[Devices] = []
-    failed_devices: list[tuple[str, str]] = []
     devices_lock = threading.Lock()  # Lock for thread-safe list operations
 
     log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
@@ -64,8 +66,9 @@ def main() -> None:
                 dev, res = future.result()
                 # Write output with thread-safe file handling
                 output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
-                with open(output_file, "a") as f:
-                    f.write(res)
+                if args.compatibility_mode:
+                    with open(output_file, "a") as f:
+                        f.write(res)
                 with devices_lock:
                     all_processed_devices.append(dev)
                     completed += 1
