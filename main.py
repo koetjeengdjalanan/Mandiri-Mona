@@ -1,8 +1,5 @@
 #!/data/mandiri-mona/.venv/bin/python3.12
 """Main entry point for bmri-monitoring-automation."""
-
-import csv
-import ipaddress
 import logging
 import queue
 import sys
@@ -18,6 +15,7 @@ from config.argument_parser import ArgumentParser
 from config.contexts import logging_context
 from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
+from helper.misc import load_devices_creds
 from helper.print_info import info_request
 from libs.device_comm import connect_ssh
 from libs.file_creation import create_ssh_config, update_fw_creds
@@ -31,27 +29,12 @@ def main() -> None:
     """Main function and entry point to execute the monitoring automation."""
     log = logging.getLogger("mandiri-mona")
 
-    # Printing Info if Requested
-    if len(args.list) > 0:
-        info_request(requests=args.list, console=console, env=env_vars)
-        log.debug(f"Information for {args.list} displayed as requested.")
+    # Read Firewall Credentials from CSV and Assign to Devices Model
+    devices_creds: list[Devices] = load_devices_creds(file_path=env_vars.file_paths.fw_creds)
+    if len(devices_creds) == 0:
+        log.info("Processing complete: 0/0 devices succeeded")
         return
 
-    # Read Firewall Credentials from CSV and Assign to Devices Model
-    devices_creds: list[Devices] = []
-    with open(file=env_vars.file_paths.fw_creds, mode="r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            devices_creds.append(
-                Devices(
-                    device_type=row.get("device_type", ""),
-                    ip=ipaddress.IPv4Address(row.get("ip", "")),
-                    username=row.get("username", ""),
-                    password=row.get("password", ""),
-                    hostname=row.get("hostname", None),
-                    monitored=row.get("monitored", "False").lower() == "true",
-                )
-            )
     log.debug(f"Loaded {len(devices_creds)} firewall credentials from CSV.")
     for tracking in track(
         create_ssh_config(file_path=env_vars.file_paths.sshd_config, devices=devices_creds),
@@ -177,7 +160,12 @@ if __name__ == "__main__":
         log.info("Starting Mandiri MONA Application")
 
         try:
-            main()
+            if len(args.list) > 0:
+                # Printing Info if Requested
+                info_request(requests=args.list, console=console, env=env_vars)
+                log.debug(f"Information for {args.list} displayed as requested.")
+            else:
+                main()
         except Exception as e:
             log.exception(f"An unhandled exception occurred: {e}", exc_info=True)
         finally:

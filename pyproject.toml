@@ -23,6 +23,7 @@ dev = [
     "ipython>=8.23.0",
     "pytest>=8.3.0",
     "pytest-cov>=5.0.0",
+    "pytest-mock>=3.15.1",
 ]
 
 [tool.black]
