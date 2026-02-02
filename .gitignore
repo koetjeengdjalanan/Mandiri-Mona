@@ -17,3 +17,8 @@ wheels/
 *.log
 debug*.*
 .devAssets/
+
+# Application data directories
+configs/
+outputs/
+logs/

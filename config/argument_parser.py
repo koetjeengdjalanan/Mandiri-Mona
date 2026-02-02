@@ -33,6 +33,30 @@ class ArgumentParser(argparse.ArgumentParser):
             help="List of items to process",
             default=[],
         )
+        super().add_argument(
+            "--daemon",
+            action="store_true",
+            help="Run as a background service with persistent SSH connections",
+            default=False,
+        )
+        super().add_argument(
+            "--interval",
+            type=int,
+            help="Interval in seconds between command executions (only for daemon mode, default: 300)",
+            default=300,
+        )
+        super().add_argument(
+            "--status",
+            action="store_true",
+            help="Check the status of the running daemon process",
+            default=False,
+        )
+        super().add_argument(
+            "--stop",
+            action="store_true",
+            help="Stop the running daemon process",
+            default=False,
+        )
 
     def error(self, message: str) -> None:
         """Override default error method to print custom message and exit."""
@@ -42,4 +66,12 @@ class ArgumentParser(argparse.ArgumentParser):
 
     def parse(self) -> argparse.Namespace:
         """Parse command line arguments."""
-        return super().parse_args()
+        args = super().parse_args()
+
+        # Validate daemon mode arguments
+        if args.daemon and args.interval <= 0:
+            self.error("Interval must be positive when running in daemon mode")
+        if (args.status or args.stop) and args.daemon:
+            self.error("Cannot use --status or --stop with --daemon flag")
+
+        return args
