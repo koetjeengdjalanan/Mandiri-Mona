@@ -5,6 +5,7 @@ from logging.handlers import QueueListener
 from queue import Queue
 from typing import Generator, Literal
 
+from influxdb_client.client.influxdb_client import InfluxDBClient
 from netmiko import BaseConnection, ConnectHandler
 from rich.console import Console
 
@@ -87,3 +88,34 @@ def ssh_connection(conn_vars: dict) -> Generator[BaseConnection, None, None]:
         yield connection
     finally:
         connection.disconnect()
+
+
+@contextmanager
+def influx_connection(conn_vars: dict) -> Generator[InfluxDBClient, None, None]:
+    """
+    Context manager for InfluxDB client connection.
+
+    Creates and manages an InfluxDB client connection with automatic cleanup.
+    Ensures the client connection is properly closed after use.
+
+    Args:
+        conn_vars: Dictionary containing InfluxDB connection parameters
+            (url, token, org, etc.).
+
+    Yields:
+        InfluxDBClient: An initialized InfluxDB client instance ready for operations.
+
+    Example:
+        >>> conn_params = {
+        ...     'url': 'http://localhost:8086',
+        ...     'token': 'my-token',
+        ...     'org': 'my-org'
+        ... }
+        >>> with influx_connection(conn_params) as influx_client:
+        ...     query_api = influx_client.query_api()
+    """
+    influx_client = InfluxDBClient(**conn_vars)
+    try:
+        yield influx_client
+    finally:
+        influx_client.close()

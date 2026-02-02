@@ -1,10 +1,9 @@
 """Helper function to print requested information."""
 
-from csv import DictReader
-
 from rich.console import Console
 from rich.table import Table
 
+from helper.misc import load_devices_creds
 from models.env import EnvironmentsVariables
 
 __all__: list[str] = ["info_request"]
@@ -36,6 +35,8 @@ def info_request(requests: list[str], console: Console, env: EnvironmentsVariabl
     """
     choices = ["devices", "env"] if "all" in requests else requests
     if "devices" in choices:
+        devices_creds = load_devices_creds(file_path=env.file_paths.fw_creds)
+
         table = Table(title="Device Information")
         table.add_column(header="Device Type", style="cyan", no_wrap=True)
         table.add_column(header="IP Address", style="magenta")
@@ -44,20 +45,16 @@ def info_request(requests: list[str], console: Console, env: EnvironmentsVariabl
         table.add_column(header="Hostname", style="white")
         table.add_column(header="Monitored", style="red")
 
-        with open(env.file_paths.fw_creds, "r") as f:
-            reader = DictReader(f)
-            for row in reader:
-                if not all(k in row for k in ["device_type", "ip", "username", "password", "hostname", "monitored"]):
-                    console.print(f"[red]Skipping malformed row:[/red] {row}")
-                    continue
-                table.add_row(
-                    row.get("device_type", ""),
-                    row.get("ip", ""),
-                    row.get("username", ""),
-                    row.get("password", ""),
-                    row.get("hostname", ""),
-                    row.get("monitored", "False"),
-                )
+        for device in devices_creds:
+            table.add_row(
+                device.device_type,
+                str(device.ip),
+                device.username,
+                device.password,
+                device.hostname or "",
+                str(device.monitored),
+            )
+
         console.print(table)
     if "env" in choices:
         console.rule(title="[bold]Environment Variables:[/bold]", style="blue", characters="=")

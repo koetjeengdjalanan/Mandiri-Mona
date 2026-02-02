@@ -12,7 +12,7 @@ class ArgumentParser(argparse.ArgumentParser):
         prog: str = "mandiri-mona"
         epil: str = "Copyright 2025 Mandiri MONA Contributors"
         super().__init__(description=desc, prog=prog, epilog=epil)
-        super().add_argument("--version", action="version", version="mandiri-mona 0.1.0")
+        super().add_argument("--version", action="version", version="mandiri-mona 0.2.0")
         super().add_argument("-v", "--verbose", action="store_true", help="Enable verbose output", default=False)
         super().add_argument("-d", "--debug", action="store_true", help="Enable debug mode", default=False)
         super().add_argument(
@@ -31,7 +31,10 @@ class ArgumentParser(argparse.ArgumentParser):
             nargs="*",
             choices=["devices", "env", "all"],
             help="List of items to process",
-            default=[],
+            default=["all"],
+        )
+        super().add_argument(
+            "--compatibility-mode", action="store_true", help="Enable compatibility mode", default=False
         )
         super().add_argument(
             "--daemon",
@@ -58,7 +61,7 @@ class ArgumentParser(argparse.ArgumentParser):
             default=False,
         )
 
-    def error(self, message: str) -> None:
+    def error(self, message: str):
         """Override default error method to print custom message and exit."""
         sys.stderr.write(f"Error: {message}\n")
         self.print_help()

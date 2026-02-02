@@ -34,7 +34,7 @@ def process_high_availability_state(output: str) -> str:
         >>> process_high_availability_state(output)
         'Active'
     """
-    return output.splitlines()[0]
+    return output.strip("\n").splitlines()[0]
 
 
 def process_system_info(output: str) -> str:
@@ -97,7 +97,7 @@ def process_resource_utilization(output: str) -> str:
     expressions: dict[str, str] = {
         "chunk": r"(DP\s+[^:]+:(?:(?!DP\s+)[^\n]*\n)*)",
         "dp_name": r"^(DP\s[\w]+)",
-        "packet": r"^(.*\:)\s*\n\s*((?:\d+\s+)+\d+)$",
+        "packet": r"^(.*\:)\s*\n\s*((?:\d+\s+)+\d+)\s?$",
     }
 
     res: str = ""
@@ -176,15 +176,17 @@ def _connect_ssh_impl(device: Devices, env_vars: EnvironmentsVariables) -> tuple
             conn_manager.send_command(command_string="show system info | match hostname", expect_string=r">")
         ).strip("\n")
         device.hostname = hostname.strip().split(" ")[-1]
-        final_res += f"{divider} show system info | match hostname {divider}\n{device.hostname}\n\n"
+        final_res += f"{divider} show system info | match hostname {divider}\nhostname: {device.hostname}\n\n"
 
         for command, func in commands:
             LOGGER.debug(f"Executing command on {device.hostname or device.ip}: {command}")
             con_res: str | list | dict = conn_manager.send_command(command)
+            LOGGER.debug(f"Raw output for command '{command}' on {device.hostname or device.ip}:\n{con_res}\n")
             if func is not None:
                 con_res = func(str(con_res))
             final_res += f"{divider} {command} {divider}\n{con_res}\n\n"
-            LOGGER.info(f"Command executed successfully on {device.hostname or device.ip}: {command}")
+            LOGGER.debug(f"Processed output for command '{command}' on {device.hostname or device.ip}:\n{con_res}\n")
+            LOGGER.debug(f"Command executed successfully on {device.hostname or device.ip}: {command}")
 
     LOGGER.debug(f"Disconnected from device {device.hostname or device.ip}")
     return device, final_res
@@ -208,11 +210,14 @@ def connect_ssh(device: Devices, env_vars: EnvironmentsVariables) -> tuple[Devic
     Raises:
         Exception: Re-raises any exception after configured retry attempts.
     """
+    retry_exceptions: tuple[type, ...] = (
+        (Exception,) if env_vars.debug_mode else (TimeoutError, NetmikoTimeoutException)
+    )
     # Create a retry decorator with dynamic max_retry from configuration
     retry_decorator = retry(
         stop=stop_after_attempt(env_vars.conn.max_retry),
         wait=wait_exponential(multiplier=1, min=2, max=5),
-        retry=retry_if_exception_type((TimeoutError, NetmikoTimeoutException)),
+        retry=retry_if_exception_type(retry_exceptions),
         before_sleep=before_sleep_log(LOGGER, logging.WARNING),
         reraise=True,
     )

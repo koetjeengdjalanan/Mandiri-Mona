@@ -1,0 +1,51 @@
+repos:
+  # isort to sort imports before committing
+  - repo: https://github.com/pycqa/isort
+    rev: 5.13.2
+    hooks:
+      - id: isort
+        args: ["--profile=black", "--line-length=120"]
+
+  - repo: local
+    hooks:
+      # Run all tests - must pass 100% before committing
+      - id: pytest
+        name: Run all tests (must pass 100%)
+        entry: pytest
+        language: system
+        pass_filenames: false
+        stages: [commit]
+        always_run: true
+
+      # Export ONLY default (main) dependencies
+      - id: uv-export
+        name: Export requirements.txt (default group only) using uv
+        entry: bash -c 'uv export --format requirements-txt --no-hashes --output-file requirements.txt && git add requirements.txt'
+        language: system
+        pass_filenames: false
+        stages: [commit]
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      # Export ONLY dependency-groups (exclude default) to requirements-dev.txt
+      - id: uv-export-dev
+        name: Export requirements-dev.txt (all dependency-groups only) using uv
+        entry: bash -c 'uv export --format requirements-txt --no-hashes --all-groups --no-default-groups --output-file requirements-dev.txt && git add requirements-dev.txt'
+        language: system
+        pass_filenames: false
+        stages: [commit]
+        files: ^(pyproject\.toml|uv\.lock)$
+
+  # Black (formatter)
+  - repo: https://github.com/psf/black
+    rev: 24.10.0
+    hooks:
+      - id: black
+        args: ["--line-length=120"]
+
+  # Ruff (lint + formatter)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+      - id: ruff-format
+        args: ["--line-length=120"]

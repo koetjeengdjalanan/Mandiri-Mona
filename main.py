@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
+#!/data/mandiri-mona/.venv/bin/python3.12
 """Main entry point for bmri-monitoring-automation."""
-
-import csv
-import ipaddress
 import logging
 import queue
 import signal
@@ -10,6 +7,7 @@ import subprocess
 import sys
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from datetime import datetime
 from pathlib import Path
 
 from rich.console import Console
@@ -19,6 +17,7 @@ from config.argument_parser import ArgumentParser
 from config.contexts import logging_context
 from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
+from helper.misc import load_devices_creds
 from helper.print_info import info_request
 from libs.daemon import DaemonManager, GracefulShutdown, daemonize
 from libs.device_comm import connect_ssh
@@ -62,28 +61,18 @@ def main() -> None:
     """Main function and entry point to execute the monitoring automation."""
     log = logging.getLogger("mandiri-mona")
 
-    # Printing Info if Requested
-    if len(args.list) > 0:
-        info_request(requests=args.list, console=console, env=env_vars)
-        log.debug(f"Information for {args.list} displayed as requested.")
+    # Read Firewall Credentials from CSV and Assign to Devices Model
+    devices_creds: list[Devices] = load_devices_creds(file_path=env_vars.file_paths.fw_creds)
+    if len(devices_creds) == 0:
+        log.info("Processing complete: 0/0 devices succeeded")
         return
 
-    # Read Firewall Credentials from CSV and Assign to Devices Model
-    devices_creds: list[Devices] = []
-    with open(file=env_vars.file_paths.fw_creds, mode="r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            devices_creds.append(
-                Devices(
-                    device_type=row.get("device_type", ""),
-                    ip=ipaddress.IPv4Address(row.get("ip", "")),
-                    username=row.get("username", ""),
-                    password=row.get("password", ""),
-                    hostname=row.get("hostname", None),
-                    monitored=row.get("monitored", "False").lower() == "true",
-                )
-            )
     log.debug(f"Loaded {len(devices_creds)} firewall credentials from CSV.")
+
+    # Process Devices with ThreadPoolExecutor for Better Concurrency
+    all_processed_devices: list[Devices] = []
+    failed_devices: list[tuple[str, str]] = []
+
     for tracking in track(
         create_ssh_config(file_path=env_vars.file_paths.sshd_config, devices=devices_creds),
         description="Creating SSH Config...",
@@ -91,9 +80,6 @@ def main() -> None:
         current, total = tracking
         log.debug(f"Processed {current}/{total} devices for SSH config.")
 
-    # Process Devices with ThreadPoolExecutor for Better Concurrency
-    all_processed_devices: list[Devices] = []
-    failed_devices: list[tuple[str, str]] = []
     devices_lock = threading.Lock()  # Lock for thread-safe list operations
 
     log.info(f"Starting device processing with {env_vars.conn.num_of_threads} worker threads")
@@ -112,8 +98,9 @@ def main() -> None:
                 dev, res = future.result()
                 # Write output with thread-safe file handling
                 output_file = env_vars.file_paths.output_dir.joinpath(f"{dev.hostname}.log")
-                with open(output_file, "a") as f:
-                    f.write(res)
+                if args.compatibility_mode:
+                    with open(output_file, "a") as f:
+                        f.write(res)
                 with devices_lock:
                     all_processed_devices.append(dev)
                     completed += 1
@@ -124,7 +111,11 @@ def main() -> None:
                     failed_devices.append((str(device.hostname or device.ip), str(e)))
                     completed += 1
                     current = completed  # Capture count inside lock for consistent logging
-                log.error(f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}")
+                log.error(
+                    f"Failed processing for device {device.hostname or device.ip} ({current}/{total}): {e}",
+                    exc_info=True,
+                    stack_info=True,
+                )
 
     # Summary report
     with devices_lock:
@@ -208,7 +199,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
     try:
-        env_file = Path("./.env").absolute()
+        env_file = Path(__file__).parent.joinpath(".env").absolute()
         if not env_file.exists():
             create_env()
             raise FileNotFoundError(".env file created, please review it and restart the application.")
@@ -291,6 +282,7 @@ if __name__ == "__main__":
         log_queue=log_q,
         level=env_vars.log_level,
     ) as log_listener:
+        start_time: datetime = datetime.now()
         logging_helper.worker_logger(
             log_queue=log_q,
             log_level=env_vars.log_level,
@@ -299,8 +291,13 @@ if __name__ == "__main__":
         log.info("Starting Mandiri MONA Application")
 
         try:
-            main()
+            if len(args.list) > 0:
+                # Printing Info if Requested
+                info_request(requests=args.list, console=console, env=env_vars)
+                log.debug(f"Information for {args.list} displayed as requested.")
+            else:
+                main()
         except Exception as e:
             log.exception(f"An unhandled exception occurred: {e}", exc_info=True)
         finally:
-            log.info("Mandiri MONA Finished Execution\n")
+            log.info(f"Mandiri MONA Finished Execution {datetime.now() - start_time}\n")
