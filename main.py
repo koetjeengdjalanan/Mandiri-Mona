@@ -2,6 +2,8 @@
 """Main entry point for bmri-monitoring-automation."""
 import logging
 import queue
+import signal
+import subprocess
 import sys
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
@@ -17,12 +19,42 @@ from helper import logging as logging_helper
 from helper.initializer import create_env, initialize, isallexists
 from helper.misc import load_devices_creds
 from helper.print_info import info_request
+from libs.daemon import DaemonManager, GracefulShutdown, daemonize
 from libs.device_comm import connect_ssh
 from libs.file_creation import create_ssh_config, update_fw_creds
+from libs.persistent_ssh import PersistentSSHService, load_devices_from_csv
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
 env_vars = EnvironmentsVariables()
+
+
+def daemon_main(interval: int) -> None:
+    """
+    Main function for daemon mode with persistent SSH connections.
+
+    Args:
+        interval (int): Interval in seconds between command executions.
+    """
+    log = logging.getLogger("mandiri-mona")
+
+    # Load devices from CSV
+    devices = load_devices_from_csv(env_vars.file_paths.fw_creds)
+    log.info(f"Loaded {len(devices)} devices from CSV for daemon mode")
+
+    # Create SSH config
+    for tracking in track(
+        create_ssh_config(file_path=env_vars.file_paths.sshd_config, devices=devices),
+        description="Creating SSH Config...",
+    ):
+        current, total = tracking
+        log.debug(f"Processed {current}/{total} devices for SSH config.")
+
+    # Initialize and run the persistent SSH service
+    service = PersistentSSHService(devices, env_vars, interval)
+
+    with GracefulShutdown() as shutdown_handler:
+        service.run(shutdown_handler)
 
 
 def main() -> None:
@@ -111,6 +143,61 @@ if __name__ == "__main__":
     env_vars.log_level = args.log_level if not args.debug else "DEBUG"
     env_vars.verbose = args.verbose
 
+    # Define PID file path
+    pid_file = Path("/tmp/mandiri-mona.pid").absolute()
+    daemon_manager = DaemonManager(pid_file)
+
+    # Handle daemon control commands (--status, --stop)
+    if args.status:
+        status = daemon_manager.get_status()
+        if status["running"]:
+            console.print(f"[green]Daemon is running[/green] (PID: {status['pid']})")
+            console.print("[cyan]Streaming logs (press Ctrl+C to stop)...[/cyan]\n")
+
+            log_file = env_vars.logging.log_file_path
+
+            # Check if log file exists
+            if not log_file.exists():
+                console.print(f"[yellow]Log file not found: {log_file}[/yellow]")
+                sys.exit(0)
+
+            try:
+                # Use tail -f to follow the log file
+                process = subprocess.Popen(
+                    ["tail", "-f", str(log_file)],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    bufsize=1,
+                )
+
+                # Handle Ctrl+C gracefully
+                def signal_handler(sig, frame):
+                    process.terminate()
+                    console.print("\n[yellow]Stopped streaming logs[/yellow]")
+                    sys.exit(0)
+
+                signal.signal(signal.SIGINT, signal_handler)
+
+                # Stream the output using console for consistency
+                for line in process.stdout:
+                    console.print(line, end="")
+
+            except Exception as e:
+                console.print(f"[red]Error streaming logs: {e}[/red]")
+                sys.exit(1)
+        else:
+            console.print("[yellow]Daemon is not running[/yellow]")
+        sys.exit(0)
+
+    if args.stop:
+        if daemon_manager.stop_daemon():
+            console.print("[green]Daemon stopped successfully[/green]")
+            sys.exit(0)
+        else:
+            console.print("[red]Failed to stop daemon or daemon is not running[/red]")
+            sys.exit(1)
+
     try:
         env_file = Path(__file__).parent.joinpath(".env").absolute()
         if not env_file.exists():
@@ -147,6 +234,47 @@ if __name__ == "__main__":
             console.print("[yellow]All required files and directories already exist.[/yellow]")
         sys.exit(0)
 
+    # Handle daemon mode
+    if args.daemon:
+        # Check if daemon is already running
+        if daemon_manager.is_running():
+            console.print(f"[red]Daemon is already running[/red] (PID: {daemon_manager.get_pid()})")
+            sys.exit(1)
+
+        console.print(f"[green]Starting daemon mode with {args.interval} second interval[/green]")
+
+        # Daemonize the process
+        daemonize()
+
+        # Write PID file
+        daemon_manager.write_pid_file()
+
+        # Set up logging for daemon mode
+        log_q: queue.Queue = queue.Queue(maxsize=-1)
+        with logging_context(
+            settings=env_vars.logging,
+            console=console,
+            log_queue=log_q,
+            level=env_vars.log_level,
+        ) as log_listener:
+            logging_helper.worker_logger(
+                log_queue=log_q,
+                log_level=env_vars.log_level,
+            )
+            log = logging.getLogger("mandiri-mona")
+            log.info("Starting Mandiri MONA Application in Daemon Mode")
+
+            try:
+                daemon_main(interval=args.interval)
+            except Exception as e:
+                log.exception(f"An unhandled exception occurred in daemon mode: {e}", exc_info=True)
+            finally:
+                daemon_manager.remove_pid_file()
+                log.info("Mandiri MONA Daemon Finished Execution\n")
+
+        sys.exit(0)
+
+    # Normal (non-daemon) mode
     log_q: queue.Queue = queue.Queue(maxsize=-1)
     with logging_context(
         settings=env_vars.logging,
