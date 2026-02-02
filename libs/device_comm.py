@@ -186,7 +186,7 @@ def _connect_ssh_impl(device: Devices, env_vars: EnvironmentsVariables) -> tuple
                 con_res = func(str(con_res))
             final_res += f"{divider} {command} {divider}\n{con_res}\n\n"
             LOGGER.debug(f"Processed output for command '{command}' on {device.hostname or device.ip}:\n{con_res}\n")
-            LOGGER.info(f"Command executed successfully on {device.hostname or device.ip}: {command}")
+            LOGGER.debug(f"Command executed successfully on {device.hostname or device.ip}: {command}")
 
     LOGGER.debug(f"Disconnected from device {device.hostname or device.ip}")
     return device, final_res
