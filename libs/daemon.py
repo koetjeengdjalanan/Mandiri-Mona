@@ -155,6 +155,9 @@ def daemonize() -> None:
     This function performs the standard Unix double-fork to create a daemon process
     that runs independently of the controlling terminal.
 
+    Note: The working directory is preserved to maintain access to relative paths
+    used throughout the application.
+
     Raises:
         OSError: If the fork operation fails.
     """
@@ -169,7 +172,7 @@ def daemonize() -> None:
         sys.exit(1)
 
     # Decouple from parent environment
-    os.chdir("/")
+    # Note: We intentionally do NOT change directory to preserve relative paths
     os.setsid()
     os.umask(0)
 

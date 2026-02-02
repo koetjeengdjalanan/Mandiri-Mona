@@ -1,0 +1,5 @@
+device_type,ip,username,password,hostname,monitored
+# NOTE: Do not commit actual credentials to version control
+# Use environment variables or encrypted credential storage for production
+paloalto_panos,192.168.1.1,admin,password123,test-firewall-1,true
+paloalto_panos,192.168.1.2,admin,password123,test-firewall-2,false

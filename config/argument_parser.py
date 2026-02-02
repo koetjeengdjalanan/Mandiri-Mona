@@ -67,11 +67,11 @@ class ArgumentParser(argparse.ArgumentParser):
     def parse(self) -> argparse.Namespace:
         """Parse command line arguments."""
         args = super().parse_args()
-        
+
         # Validate daemon mode arguments
         if args.daemon and args.interval <= 0:
             self.error("Interval must be positive when running in daemon mode")
         if (args.status or args.stop) and args.daemon:
             self.error("Cannot use --status or --stop with --daemon flag")
-        
+
         return args

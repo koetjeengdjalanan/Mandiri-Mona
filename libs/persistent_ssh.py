@@ -16,6 +16,9 @@ from models.main import Devices
 
 LOGGER = logging.getLogger("mandiri-mona.persistent_ssh")
 
+# Configuration constants
+RECONNECT_DELAY_SECONDS = 2  # Delay before attempting to reconnect after connection loss
+
 
 class PersistentSSHConnection:
     """
@@ -111,7 +114,10 @@ class PersistentSSHConnection:
                 return False
 
             try:
-                # Send a simple command to test connection
+                # Use Netmiko's built-in is_alive method if available
+                if hasattr(self.connection, 'is_alive') and callable(self.connection.is_alive):
+                    return self.connection.is_alive()
+                # Fallback: send empty command as keepalive test
                 self.connection.send_command("", expect_string=r">", read_timeout=5)
                 return True
             except Exception as e:
@@ -123,7 +129,7 @@ class PersistentSSHConnection:
         """Reconnect to the device if connection is lost."""
         LOGGER.info(f"Attempting to reconnect to {self.device.hostname or self.device.ip}")
         self.disconnect()
-        time.sleep(2)  # Brief delay before reconnecting
+        time.sleep(RECONNECT_DELAY_SECONDS)
         self.connect()
 
     def execute_commands(self, commands: Iterable[tuple[str, Callable | None]]) -> str:
