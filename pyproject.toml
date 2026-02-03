@@ -58,3 +58,9 @@ ignore = ["D212", "D107"]
 
 [tool.ruff.pydocstyle]
 convention = "google"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -vv --cov=libs --cov=main --cov-report=term-missing"
+testpaths = ["tests"]
+python_files = ["test_*.py", "*_test.py"]

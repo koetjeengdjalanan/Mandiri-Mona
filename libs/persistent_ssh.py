@@ -71,14 +71,19 @@ class PersistentSSHConnection:
                 self.connection = ConnectHandler(**conn_vars)
                 self._connected = True
 
-                # Get hostname if not already set
-                if not self.device.hostname:
+                try:
+                    # Always fetch hostname to ensure it reflects the current device state
                     hostname = str(
                         self.connection.send_command(
                             command_string="show system info | match hostname", expect_string=r">"
                         )
                     ).strip("\n")
                     self.device.hostname = hostname.strip().split(" ")[-1]
+                except Exception as e:
+                    LOGGER.warning(f"Failed to retrieve hostname from {self.device.ip}: {e}")
+                    # Keep using IP if hostname retrieval fails
+                    if not self.device.hostname:
+                        self.device.hostname = str(self.device.ip)
 
                 LOGGER.info(f"Successfully connected to {self.device.hostname}")
             except Exception as e:
@@ -395,7 +400,7 @@ class PersistentSSHService:
                     sleep_time += 1
 
         except Exception as e:
-            LOGGER.exception(f"Critical error in persistent SSH service: {e}")
+            LOGGER.critical(f"Critical error in persistent SSH service: {e}", exc_info=True)
         finally:
             self.cleanup_connections()
             LOGGER.info("Persistent SSH service stopped")

@@ -7,12 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from libs.persistent_ssh import (
-    RECONNECT_DELAY_SECONDS,
-    PersistentSSHConnection,
-    PersistentSSHService,
-)
 from helper.misc import load_devices_creds as load_devices_from_csv
+from libs.persistent_ssh import RECONNECT_DELAY_SECONDS, PersistentSSHConnection, PersistentSSHService
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -179,9 +175,8 @@ class TestPersistentSSHConnection:
     def test_execute_commands_success(self, mock_handler, mock_device, mock_env_vars):
         """Test executing commands successfully."""
         mock_connection = MagicMock()
-        # Since mock_device has hostname, connect won't call send_command
-        # Use side_effect to return different values for each command
-        mock_connection.send_command.side_effect = ["CPU: 50%", "Memory: 60%"]
+        # Mock returns hostname during connect, then command results
+        mock_connection.send_command.side_effect = ["hostname: test-device", "CPU: 50%", "Memory: 60%"]
         mock_handler.return_value = mock_connection
 
         conn = PersistentSSHConnection(mock_device, mock_env_vars)
@@ -222,8 +217,8 @@ class TestPersistentSSHConnection:
     def test_execute_commands_failure(self, mock_handler, mock_device, mock_env_vars):
         """Test executing commands with failure."""
         mock_connection = MagicMock()
-        # Since mock_device has hostname, connect won't call send_command
-        mock_connection.send_command.side_effect = Exception("Command failed")
+        # Return hostname during connect, then raise exception for command execution
+        mock_connection.send_command.side_effect = ["hostname: test-device", Exception("Command failed")]
         mock_handler.return_value = mock_connection
 
         conn = PersistentSSHConnection(mock_device, mock_env_vars)
