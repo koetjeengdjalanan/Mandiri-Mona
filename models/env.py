@@ -4,7 +4,7 @@ from os import getenv
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, DirectoryPath, Field, FilePath, PositiveInt, StrictBool, field_validator
+from pydantic import BaseModel, DirectoryPath, Field, FilePath, PositiveInt, StrictBool, StrictStr, field_validator
 
 from helper.default_handler import create_filedir
 
@@ -189,6 +189,35 @@ class FilePathConfig(BaseModel):
         return path
 
 
+class InfluxDBSettings(BaseModel):
+    """
+    InfluxDBSettings defines configuration parameters for connecting to an InfluxDB instance.
+
+    Attributes:
+        token (StrictStr): InfluxDB authentication token, loaded from environment variable 'INFLUXDB_TOKEN'.
+        url (StrictStr): InfluxDB URL, loaded from environment variable 'INFLUXDB_URL'.
+        org (StrictStr): InfluxDB organization, loaded from environment variable 'INFLUXDB_ORG'.
+        bucket (StrictStr): InfluxDB bucket, loaded from environment variable 'INFLUXDB_BUCKET'.
+
+    Methods:
+        conn_params() -> dict[str, str]: Returns a dictionary containing the connection parameters ('url', 'token', 'org').
+    """  # noqa: E501
+
+    token: StrictStr = Field(default=getenv("INFLUXDB_TOKEN", ""), description="InfluxDB authentication token")
+    url: StrictStr = Field(default=getenv("INFLUXDB_URL", ""), description="InfluxDB URL")
+    org: StrictStr = Field(default=getenv("INFLUXDB_ORG", ""), description="InfluxDB organization")
+    bucket: StrictStr = Field(default=getenv("INFLUXDB_BUCKET", ""), description="InfluxDB bucket")
+
+    @classmethod
+    def conn_params(self) -> dict[str, str]:
+        """Return InfluxDB connection parameters as a dictionary."""
+        return {
+            "url": self.url,
+            "token": self.token,
+            "org": self.org,
+        }
+
+
 class EnvironmentsVariables(BaseModel):
     """
     Pydantic model for managing application environment variables and configuration settings.
@@ -202,6 +231,8 @@ class EnvironmentsVariables(BaseModel):
             variable. Accepts "true", "1", or "t" (case-insensitive) as True values.
         log_level (Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]): The logging
             level for the application. Defaults to "INFO" if not specified.
+        compatibility_mode (StrictBool): Flag to enable compatibility mode for older reports
+            models. Defaults to False.
         verbose (StrictBool): User verbosity flag. When set to True, changes the debug
             level to DEBUG. Defaults to False.
         file_paths (FilePathConfig): Configuration object for file paths used by the
@@ -209,6 +240,8 @@ class EnvironmentsVariables(BaseModel):
         conn (ConnectionSettings): Configuration object for connection settings.
             Created using default factory.
         logging (LoggingSettings): Configuration object for logging settings.
+            Created using default factory.
+        influxdb (InfluxDBSettings): Configuration object for InfluxDB settings.
             Created using default factory.
 
     Example:
@@ -229,10 +262,12 @@ class EnvironmentsVariables(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO", description="Logging level for the application"
     )
+    compatibility_mode: StrictBool = Field(False, description="Enables compatibility mode for older reports models")
     verbose: StrictBool = Field(False, description="User verbosity flag, will change debug level to DEBUG if set")
     file_paths: FilePathConfig = Field(default_factory=FilePathConfig)
     conn: ConnectionSettings = Field(default_factory=ConnectionSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    influxdb: InfluxDBSettings = Field(default_factory=InfluxDBSettings)
 
     @field_validator("log_level", mode="before")
     @classmethod

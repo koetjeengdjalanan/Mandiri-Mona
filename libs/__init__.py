@@ -5,6 +5,7 @@ from .device_comm import process_high_availability_state as ha_proc
 from .device_comm import process_resource_utilization as resutil_proc
 from .device_comm import process_system_info as sysinf_proc
 
+# TODO: If there is no function assign to a command, then it should return the raw output as is with a lambda function.
 COMMANDS_LIST: dict[str, list[tuple[str, Callable | None]]] = {
     "dep_format": [
         ("show system state | match 1minavg", None),

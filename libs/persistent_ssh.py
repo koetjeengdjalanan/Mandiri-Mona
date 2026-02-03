@@ -1,13 +1,18 @@
 """Module for managing persistent SSH connections as a background service."""
 
+import datetime
 import logging
 import threading
 import time
+import zoneinfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable
 
+from influxdb_client import Point, WritePrecision
 from netmiko import ConnectHandler
 
+from config.contexts import influx_connection
+from libs import COMMANDS_LIST
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -134,7 +139,7 @@ class PersistentSSHConnection:
         time.sleep(RECONNECT_DELAY_SECONDS)
         self.connect()
 
-    def execute_commands(self, commands: Iterable[tuple[str, Callable | None]]) -> str:
+    def execute_commands_compatibility(self, commands: Iterable[tuple[str, Callable | None]]) -> str:
         """
         Execute a series of commands on the connected device.
 
@@ -167,6 +172,38 @@ class PersistentSSHConnection:
                     final_res += f"{divider} {command} {divider}\nERROR: {e}\n\n"
 
             return final_res
+
+    def execute_commands(self, commands: Iterable[tuple[str, Callable | None]]) -> dict[str, str | dict | None]:
+        """
+        Execute a series of commands on the connected device.
+
+        Args:
+            commands (Iterable[tuple[str, Callable | None]]): List of (command, processor) tuples.
+
+        Returns:
+            dict[str, str | list | dict]: Dictionary mapping commands to their processed outputs.
+
+        Raises:
+            Exception: If connection is not established or commands fail.
+        """
+        with self.lock:
+            if not self._connected or not self.connection:
+                raise ConnectionError(f"Not connected to {self.device.hostname or self.device.ip}")
+
+            results: dict[str, str | dict | None] = {}
+
+            for command, func in commands:
+                try:
+                    LOGGER.debug(f"Executing command on {self.device.hostname}: {command}")
+                    raw: str | list | dict = self.connection.send_command(command)
+                    con_res: dict[str, str | dict | None] = func(str(raw)) if func is not None else {command: None}
+                    results.update(con_res)
+                    LOGGER.debug(f"Command executed successfully on {self.device.hostname}: {command}")
+                except Exception as e:
+                    LOGGER.error(f"Failed to execute command '{command}' on {self.device.hostname}: {e}")
+                    results[command] = f"ERROR: {e}"
+
+            return results
 
 
 class PersistentSSHService:
@@ -341,21 +378,49 @@ class PersistentSSHService:
                     LOGGER.warning(f"Connection to {conn.device.hostname or ip} is not alive, reconnecting")
                     conn.reconnect()
 
-                # Execute commands
-                commands = self.get_commands_for_device(conn.device)
-                result = conn.execute_commands(commands)
+                if self.env_vars.compatibility_mode:
+                    LOGGER.info(f"Using compatibility mode for {conn.device.hostname or ip}")
+                    # Execute commands
+                    commands = self.get_commands_for_device(conn.device)
+                    result = conn.execute_commands_compatibility(commands)
 
-                # Write output to file
-                output_file = self.env_vars.file_paths.output_dir.joinpath(f"{conn.device.hostname}.log")
-                with open(output_file, "a") as f:
-                    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                    f.write(f"\n{'=' * 50}\n")
-                    f.write(f"Timestamp: {timestamp}\n")
-                    f.write(f"{'=' * 50}\n")
-                    f.write(result)
+                    # Write output to file
+                    output_file = self.env_vars.file_paths.output_dir.joinpath(f"{conn.device.hostname}.log")
+                    with open(output_file, "a") as f:
+                        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                        f.write(f"\n{'=' * 50}\n")
+                        f.write(f"Timestamp: {timestamp}\n")
+                        f.write(f"{'=' * 50}\n")
+                        f.write(result)
 
-                LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
-                return (ip, None)
+                    LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
+                    return (ip, None)
+                else:
+                    commands: list[tuple[str, Callable | None]] = COMMANDS_LIST["influxdb_format"]
+                    result = conn.execute_commands(commands)
+
+                    payload: Point = Point.from_dict(
+                        {
+                            "measurement": "pa_devices_hw_metrics",
+                            "tags": {
+                                "device_ip": str(ip),
+                                "device_name": conn.device.hostname,
+                            },
+                            "fields": result,
+                            "time": int(datetime.datetime.now(tz=zoneinfo.ZoneInfo("Asia/Jakarta")).timestamp()),
+                        },
+                        write_precision=WritePrecision.S,  # type: ignore[invalid-argument-type]
+                    )
+                    with influx_connection(self.env_vars.influxdb.conn_params()) as db_conn:
+                        write_api = db_conn.write_api()
+                        write_api.write(
+                            bucket=self.env_vars.influxdb.bucket,
+                            org=self.env_vars.influxdb.org,
+                            record=payload,
+                        )
+
+                    LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
+                    return (ip, None)
 
             except Exception as e:
                 LOGGER.error(f"Error during monitoring cycle for {ip}: {e}")
