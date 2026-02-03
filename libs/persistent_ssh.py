@@ -231,7 +231,6 @@ class PersistentSSHService:
 
             try:
                 # Re-read environment variables
-                from os import getenv
                 from pathlib import Path
 
                 from dotenv import load_dotenv
@@ -358,7 +357,7 @@ class PersistentSSHService:
                 return (ip, str(e))
 
         # Use ThreadPoolExecutor to process devices in parallel
-        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="Mona_Monitor") as executor:
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="MandiriMona_Monitor") as executor:
             # Submit all device monitoring tasks
             futures = {executor.submit(monitor_device, ip, conn): ip for ip, conn in list(self.connections.items())}
 

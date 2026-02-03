@@ -280,7 +280,7 @@ class TestPersistentSSHService:
         env.conn = MagicMock()
         env.conn.conn_timeout = 30
         env.conn.read_timeout_override = 60
-        env.conn.num_of_threads = 4  # Provide actual integer instead of MagicMock
+        env.conn.num_of_threads = 4  # ThreadPoolExecutor requires an actual integer value
         return env
 
     def test_init(self, mock_devices, mock_env_vars):
