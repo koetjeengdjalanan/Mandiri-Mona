@@ -54,7 +54,34 @@ def daemon_main(interval: int) -> None:
     service = PersistentSSHService(devices, env_vars, interval)
 
     with GracefulShutdown() as shutdown_handler:
-        service.run(shutdown_handler)
+        # Initialize connections
+        service.initialize_connections()
+
+        log.info(f"Starting monitoring service with {interval} second interval")
+
+        while shutdown_handler.should_continue():
+            # Check for reload signal
+            if shutdown_handler.should_reload():
+                log.info("Reload signal received, reloading configuration")
+                service.reload_config()
+                shutdown_handler.reset_reload_flag()
+
+            # Run monitoring cycle
+            service.run_monitoring_cycle()
+
+            # Sleep in small intervals to allow for responsive shutdown and reload
+            sleep_time = 0
+            while sleep_time < interval and shutdown_handler.should_continue():
+                time.sleep(1)
+                sleep_time += 1
+
+                # Check for reload during sleep
+                if shutdown_handler.should_reload():
+                    break
+
+        # Cleanup
+        service.cleanup_connections()
+        log.info("Persistent SSH service stopped")
 
 
 def main() -> None:
@@ -203,6 +230,14 @@ if __name__ == "__main__":
             sys.exit(0)
         else:
             console.print("[red]Failed to stop daemon or daemon is not running[/red]")
+            sys.exit(1)
+
+    if args.reload:
+        if daemon_manager.reload_daemon():
+            console.print("[green]Reload signal sent to daemon successfully[/green]")
+            sys.exit(0)
+        else:
+            console.print("[red]Failed to send reload signal or daemon is not running[/red]")
             sys.exit(1)
 
     try:

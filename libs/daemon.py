@@ -130,6 +130,27 @@ class DaemonManager:
             LOGGER.error(f"Failed to stop daemon: {e}")
             return False
 
+    def reload_daemon(self) -> bool:
+        """
+        Send reload signal (SIGHUP) to the running daemon process.
+
+        Returns:
+            bool: True if reload signal was sent successfully, False otherwise.
+        """
+        pid = self.get_pid()
+        if pid is None:
+            LOGGER.info("No daemon process is running")
+            return False
+
+        try:
+            LOGGER.info(f"Sending reload signal to daemon process (PID: {pid})")
+            os.kill(pid, signal.SIGHUP)
+            LOGGER.info("Reload signal sent successfully")
+            return True
+        except OSError as e:
+            LOGGER.error(f"Failed to send reload signal to daemon: {e}")
+            return False
+
     def get_status(self) -> dict[str, str | int | None]:
         """
         Get the current status of the daemon.
@@ -199,16 +220,18 @@ class GracefulShutdown:
     """
     Context manager for handling graceful shutdown on signal reception.
 
-    This class sets up signal handlers for SIGTERM and SIGINT to enable
-    graceful shutdown of the daemon process.
+    This class sets up signal handlers for SIGTERM, SIGINT, and SIGHUP to enable
+    graceful shutdown and configuration reload of the daemon process.
 
     Attributes:
         shutdown_flag (bool): Flag indicating whether shutdown has been requested.
+        reload_flag (bool): Flag indicating whether configuration reload has been requested.
     """
 
     def __init__(self) -> None:
         """Initialize the GracefulShutdown handler."""
         self.shutdown_flag = False
+        self.reload_flag = False
 
     def __enter__(self) -> "GracefulShutdown":
         """
@@ -217,18 +240,20 @@ class GracefulShutdown:
         Returns:
             GracefulShutdown: The instance itself.
         """
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        signal.signal(signal.SIGINT, self._signal_handler)
+        signal.signal(signal.SIGTERM, self._shutdown_signal_handler)
+        signal.signal(signal.SIGINT, self._shutdown_signal_handler)
+        signal.signal(signal.SIGHUP, self._reload_signal_handler)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         """Clean up signal handlers when exiting the context."""
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.signal(signal.SIGHUP, signal.SIG_DFL)
 
-    def _signal_handler(self, signum: int, frame) -> None:
+    def _shutdown_signal_handler(self, signum: int, frame) -> None:
         """
-        Handle shutdown signals.
+        Handle shutdown signals (SIGTERM, SIGINT).
 
         Args:
             signum (int): The signal number.
@@ -236,6 +261,17 @@ class GracefulShutdown:
         """
         LOGGER.info(f"Received signal {signum}, initiating graceful shutdown")
         self.shutdown_flag = True
+
+    def _reload_signal_handler(self, signum: int, frame) -> None:
+        """
+        Handle reload signal (SIGHUP).
+
+        Args:
+            signum (int): The signal number.
+            frame: The current stack frame.
+        """
+        LOGGER.info(f"Received signal {signum}, initiating configuration reload")
+        self.reload_flag = True
 
     def should_continue(self) -> bool:
         """
@@ -245,3 +281,16 @@ class GracefulShutdown:
             bool: True if the process should continue, False if shutdown requested.
         """
         return not self.shutdown_flag
+
+    def should_reload(self) -> bool:
+        """
+        Check if configuration reload has been requested.
+
+        Returns:
+            bool: True if reload has been requested, False otherwise.
+        """
+        return self.reload_flag
+
+    def reset_reload_flag(self) -> None:
+        """Reset the reload flag after handling the reload."""
+        self.reload_flag = False

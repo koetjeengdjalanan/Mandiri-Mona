@@ -164,7 +164,7 @@ class TestGracefulShutdown:
     def test_signal_handler(self):
         """Test signal handler sets shutdown flag."""
         handler = GracefulShutdown()
-        handler._signal_handler(signal.SIGTERM, None)
+        handler._shutdown_signal_handler(signal.SIGTERM, None)
         assert handler.shutdown_flag is True
         assert handler.should_continue() is False
 

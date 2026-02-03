@@ -11,8 +11,8 @@ from libs.persistent_ssh import (
     RECONNECT_DELAY_SECONDS,
     PersistentSSHConnection,
     PersistentSSHService,
-    load_devices_from_csv,
 )
+from helper.misc import load_devices_creds as load_devices_from_csv
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -280,6 +280,7 @@ class TestPersistentSSHService:
         env.conn = MagicMock()
         env.conn.conn_timeout = 30
         env.conn.read_timeout_override = 60
+        env.conn.num_of_threads = 4  # Provide actual integer instead of MagicMock
         return env
 
     def test_init(self, mock_devices, mock_env_vars):
