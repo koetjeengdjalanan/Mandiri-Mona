@@ -147,6 +147,23 @@ class TestDaemonManager:
         assert status["running"] is True
         assert status["pid"] == os.getpid()
 
+    @patch("os.kill")
+    def test_reload_daemon_success(self, mock_kill, temp_pid_file):
+        """Test sending reload signal to daemon."""
+        manager = DaemonManager(temp_pid_file)
+        test_pid = 12345
+        with open(temp_pid_file, "w") as f:
+            f.write(str(test_pid))
+
+        result = manager.reload_daemon()
+        assert result is True
+        mock_kill.assert_called_once_with(test_pid, signal.SIGHUP)
+
+    def test_reload_daemon_no_process(self, temp_pid_file):
+        """Test reloading daemon when no process is running."""
+        manager = DaemonManager(temp_pid_file)
+        assert not manager.reload_daemon()
+
 
 class TestGracefulShutdown:
     """Test suite for GracefulShutdown class."""
@@ -155,6 +172,7 @@ class TestGracefulShutdown:
         """Test GracefulShutdown initialization."""
         handler = GracefulShutdown()
         assert handler.shutdown_flag is False
+        assert handler.reload_flag is False
 
     def test_should_continue_initial(self):
         """Test should_continue initial state."""
@@ -168,6 +186,22 @@ class TestGracefulShutdown:
         assert handler.shutdown_flag is True
         assert handler.should_continue() is False
 
+    def test_reload_signal_handler(self):
+        """Test reload signal handler sets reload flag."""
+        handler = GracefulShutdown()
+        handler._reload_signal_handler(signal.SIGHUP, None)
+        assert handler.reload_flag is True
+        assert handler.should_reload() is True
+
+    def test_reset_reload_flag(self):
+        """Test resetting reload flag."""
+        handler = GracefulShutdown()
+        handler._reload_signal_handler(signal.SIGHUP, None)
+        assert handler.reload_flag is True
+        handler.reset_reload_flag()
+        assert handler.reload_flag is False
+        assert handler.should_reload() is False
+
     def test_context_manager(self):
         """Test GracefulShutdown as context manager."""
         with GracefulShutdown() as handler:
@@ -180,11 +214,12 @@ class TestGracefulShutdown:
         with GracefulShutdown():
             # Verify signal handlers were set
             calls = mock_signal.call_args_list
-            assert len(calls) >= 2
-            # Check that SIGTERM and SIGINT were registered
-            signals_registered = [call[0][0] for call in calls[:2]]
+            assert len(calls) >= 3
+            # Check that SIGTERM, SIGINT, and SIGHUP were registered
+            signals_registered = [call[0][0] for call in calls[:3]]
             assert signal.SIGTERM in signals_registered
             assert signal.SIGINT in signals_registered
+            assert signal.SIGHUP in signals_registered
 
     @patch("signal.signal")
     def test_context_manager_restores_handlers(self, mock_signal):
@@ -195,8 +230,9 @@ class TestGracefulShutdown:
         # Verify signal handlers were restored
         calls = mock_signal.call_args_list
         # Should have calls for setting and then restoring
-        assert len(calls) >= 4
-        # Last two calls should restore to SIG_DFL
+        assert len(calls) >= 6
+        # Last three calls should restore to SIG_DFL
+        assert calls[-3][0][1] == signal.SIG_DFL
         assert calls[-2][0][1] == signal.SIG_DFL
         assert calls[-1][0][1] == signal.SIG_DFL
 
