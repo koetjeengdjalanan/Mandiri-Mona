@@ -9,6 +9,8 @@ asttokens==3.0.1
 bcrypt==5.0.0
     # via paramiko
 black==25.11.0
+certifi==2026.1.4
+    # via influxdb-client
 cffi==2.0.0 ; implementation_name == 'pypy' or platform_python_implementation != 'PyPy'
     # via
     #   cryptography
@@ -33,6 +35,8 @@ decorator==5.2.1
     # via ipython
 executing==2.2.1
     # via stack-data
+influxdb-client==1.50.0
+    # via mandiri-mona
 iniconfig==2.3.0
     # via pytest
 invoke==2.2.1
@@ -115,10 +119,15 @@ pynacl==1.6.1
 pyserial==3.5
     # via netmiko
 pytest==9.0.1
-    # via pytest-cov
+    # via
+    #   pytest-cov
+    #   pytest-mock
 pytest-cov==7.0.0
+pytest-mock==3.15.1
 python-dateutil==2.9.0.post0
-    # via jupyter-client
+    # via
+    #   influxdb-client
+    #   jupyter-client
 python-dotenv==1.2.1
     # via mandiri-mona
 pytokens==0.3.0
@@ -129,6 +138,8 @@ pyzmq==27.1.0
     # via
     #   ipykernel
     #   jupyter-client
+reactivex==4.1.0
+    # via influxdb-client
 rich==14.2.0
     # via
     #   mandiri-mona
@@ -165,8 +176,11 @@ typing-extensions==4.15.0
     # via
     #   pydantic
     #   pydantic-core
+    #   reactivex
     #   typing-inspection
 typing-inspection==0.4.2
     # via pydantic
+urllib3==2.6.3
+    # via influxdb-client
 wcwidth==0.2.14
     # via prompt-toolkit
