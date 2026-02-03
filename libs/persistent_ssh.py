@@ -3,6 +3,7 @@
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable
 
 from netmiko import ConnectHandler
@@ -190,6 +191,7 @@ class PersistentSSHService:
         self.env_vars = env_vars
         self.interval = interval
         self.connections: dict[str, PersistentSSHConnection] = {}
+        self._reload_lock = threading.Lock()  # Lock for thread-safe reload operations
 
     def initialize_connections(self) -> None:
         """Establish initial connections to all devices."""
@@ -214,6 +216,77 @@ class PersistentSSHService:
             except Exception as e:
                 LOGGER.error(f"Error disconnecting from {ip}: {e}")
         self.connections.clear()
+
+    def reload_config(self) -> None:
+        """
+        Reload configuration from fw_creds.csv and .env file.
+
+        This method re-reads the credentials file and environment variables,
+        then updates connections accordingly. Existing connections to devices
+        that are still present are kept, new devices are connected, and removed
+        devices are disconnected.
+        """
+        with self._reload_lock:
+            LOGGER.info("Reloading configuration from fw_creds.csv and .env file")
+
+            try:
+                # Re-read environment variables
+                from pathlib import Path
+
+                from dotenv import load_dotenv
+
+                # Reload .env file
+                env_file = Path(".env").absolute()
+                if env_file.exists():
+                    load_dotenv(env_file, override=True)
+                    LOGGER.info("Reloaded .env file")
+
+                # Re-create environment variables object
+                from models.env import EnvironmentsVariables
+
+                new_env_vars = EnvironmentsVariables()
+                self.env_vars = new_env_vars
+
+                # Re-read devices from CSV
+                from helper.misc import load_devices_creds
+
+                new_devices = load_devices_creds(file_path=self.env_vars.file_paths.fw_creds)
+                LOGGER.info(f"Loaded {len(new_devices)} devices from CSV")
+
+                # Track devices by IP for easy comparison
+                new_device_ips = {str(device.ip): device for device in new_devices}
+                current_device_ips = {str(device.ip): device for device in self.devices}
+
+                # Disconnect from devices that are no longer in the list
+                devices_to_remove = set(current_device_ips.keys()) - set(new_device_ips.keys())
+                for ip in devices_to_remove:
+                    if ip in self.connections:
+                        LOGGER.info(f"Disconnecting from removed device: {ip}")
+                        try:
+                            self.connections[ip].disconnect()
+                            del self.connections[ip]
+                        except Exception as e:
+                            LOGGER.error(f"Error disconnecting from {ip}: {e}")
+
+                # Connect to new devices
+                devices_to_add = set(new_device_ips.keys()) - set(current_device_ips.keys())
+                for ip in devices_to_add:
+                    device = new_device_ips[ip]
+                    LOGGER.info(f"Connecting to new device: {ip}")
+                    try:
+                        conn = PersistentSSHConnection(device, self.env_vars)
+                        conn.connect()
+                        self.connections[ip] = conn
+                    except Exception as e:
+                        LOGGER.error(f"Failed to connect to new device {ip}: {e}")
+
+                # Update the devices list
+                self.devices = new_devices
+
+                LOGGER.info(f"Configuration reloaded successfully. Active connections: {len(self.connections)}")
+
+            except Exception as e:
+                LOGGER.error(f"Failed to reload configuration: {e}")
 
     def get_commands_for_device(self, device: Devices) -> Iterable[tuple[str, Callable | None]]:
         """
@@ -240,10 +313,23 @@ class PersistentSSHService:
         return commands
 
     def run_monitoring_cycle(self) -> None:
-        """Execute one monitoring cycle on all connected devices."""
+        """Execute one monitoring cycle on all connected devices in parallel."""
         LOGGER.info("Starting monitoring cycle")
 
-        for ip, conn in list(self.connections.items()):
+        # Get the number of threads to use from environment variables
+        max_workers = self.env_vars.conn.num_of_threads
+
+        def monitor_device(ip: str, conn: PersistentSSHConnection) -> tuple[str, str | None]:
+            """
+            Monitor a single device.
+
+            Args:
+                ip (str): Device IP address.
+                conn (PersistentSSHConnection): Connection object for the device.
+
+            Returns:
+                tuple[str, str | None]: (device_ip, error_message or None)
+            """
             try:
                 # Check connection health
                 if not conn.is_alive():
@@ -264,9 +350,26 @@ class PersistentSSHService:
                     f.write(result)
 
                 LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
+                return (ip, None)
 
             except Exception as e:
                 LOGGER.error(f"Error during monitoring cycle for {ip}: {e}")
+                return (ip, str(e))
+
+        # Use ThreadPoolExecutor to process devices in parallel
+        with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="MandiriMona_Monitor") as executor:
+            # Submit all device monitoring tasks
+            futures = {executor.submit(monitor_device, ip, conn): ip for ip, conn in list(self.connections.items())}
+
+            # Wait for all tasks to complete
+            for future in as_completed(futures):
+                ip = futures[future]
+                try:
+                    device_ip, error = future.result()
+                    if error:
+                        LOGGER.warning(f"Device {device_ip} monitoring failed: {error}")
+                except Exception as e:
+                    LOGGER.error(f"Unexpected error processing device {ip}: {e}")
 
         LOGGER.info("Monitoring cycle completed")
 

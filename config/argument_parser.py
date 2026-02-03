@@ -60,6 +60,12 @@ class ArgumentParser(argparse.ArgumentParser):
             help="Stop the running daemon process",
             default=False,
         )
+        super().add_argument(
+            "--reload",
+            action="store_true",
+            help="Reload configuration (re-read fw_creds.csv and .env) for the running daemon process",
+            default=False,
+        )
 
     def error(self, message: str):
         """Override default error method to print custom message and exit."""
@@ -74,7 +80,7 @@ class ArgumentParser(argparse.ArgumentParser):
         # Validate daemon mode arguments
         if args.daemon and args.interval <= 0:
             self.error("Interval must be positive when running in daemon mode")
-        if (args.status or args.stop) and args.daemon:
-            self.error("Cannot use --status or --stop with --daemon flag")
+        if (args.status or args.stop or args.reload) and args.daemon:
+            self.error("Cannot use --status, --stop, or --reload with --daemon flag")
 
         return args

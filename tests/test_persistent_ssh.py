@@ -11,8 +11,8 @@ from libs.persistent_ssh import (
     RECONNECT_DELAY_SECONDS,
     PersistentSSHConnection,
     PersistentSSHService,
-    load_devices_from_csv,
 )
+from helper.misc import load_devices_creds as load_devices_from_csv
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -280,6 +280,7 @@ class TestPersistentSSHService:
         env.conn = MagicMock()
         env.conn.conn_timeout = 30
         env.conn.read_timeout_override = 60
+        env.conn.num_of_threads = 4  # ThreadPoolExecutor requires an actual integer value
         return env
 
     def test_init(self, mock_devices, mock_env_vars):
@@ -409,6 +410,107 @@ class TestPersistentSSHService:
 
         # Should attempt to reconnect
         mock_conn.reconnect.assert_called_once()
+
+    @patch("helper.misc.load_devices_creds")
+    @patch("models.env.EnvironmentsVariables")
+    @patch("pathlib.Path.exists")
+    def test_reload_config(self, mock_path_exists, mock_env_class, mock_load_creds, mock_devices, mock_env_vars):
+        """Test reloading configuration."""
+        # Setup initial service
+        service = PersistentSSHService(mock_devices[:1], mock_env_vars, interval=60)
+
+        # Add mock connection
+        mock_conn = MagicMock()
+        service.connections = {"192.168.1.1": mock_conn}
+
+        # Setup mocks for reload
+        new_device = Devices(
+            device_type="paloalto_panos",
+            ip=IPv4Address("192.168.1.3"),
+            username="admin",
+            password="password",
+            hostname="device3",
+            monitored=False,
+        )
+        mock_load_creds.return_value = [mock_devices[0], new_device]
+        mock_env_class.return_value = mock_env_vars
+        mock_path_exists.return_value = False  # Simpler: assume .env doesn't exist
+
+        # Reload configuration
+        service.reload_config()
+
+        # Verify devices were reloaded
+        mock_load_creds.assert_called_once()
+
+        # Verify devices list was updated
+        assert len(service.devices) == 2
+
+    @patch("helper.misc.load_devices_creds")
+    @patch("models.env.EnvironmentsVariables")
+    @patch("pathlib.Path.exists")
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_reload_config_adds_new_device(
+        self, mock_conn_class, mock_path_exists, mock_env_class, mock_load_creds, mock_devices, mock_env_vars
+    ):
+        """Test reload adds new devices and connects to them."""
+        # Setup initial service with one device
+        service = PersistentSSHService([mock_devices[0]], mock_env_vars, interval=60)
+        service.connections = {}
+
+        # Setup mocks - add a new device
+        new_device = Devices(
+            device_type="paloalto_panos",
+            ip=IPv4Address("192.168.1.3"),
+            username="admin",
+            password="password",
+            hostname="device3",
+            monitored=False,
+        )
+        mock_load_creds.return_value = [mock_devices[0], new_device]
+        mock_env_class.return_value = mock_env_vars
+        mock_path_exists.return_value = False
+
+        # Create mock connection
+        mock_new_conn = MagicMock()
+        mock_conn_class.return_value = mock_new_conn
+
+        # Reload configuration
+        service.reload_config()
+
+        # Verify new connection was created
+        assert mock_conn_class.call_count >= 1
+        mock_new_conn.connect.assert_called()
+
+    @patch("helper.misc.load_devices_creds")
+    @patch("models.env.EnvironmentsVariables")
+    @patch("pathlib.Path.exists")
+    def test_reload_config_removes_old_device(
+        self, mock_path_exists, mock_env_class, mock_load_creds, mock_devices, mock_env_vars
+    ):
+        """Test reload removes devices that are no longer in CSV."""
+        # Setup initial service with two devices
+        service = PersistentSSHService(mock_devices, mock_env_vars, interval=60)
+
+        # Add mock connections for both devices
+        mock_conn1 = MagicMock()
+        mock_conn2 = MagicMock()
+        service.connections = {"192.168.1.1": mock_conn1, "192.168.1.2": mock_conn2}
+
+        # Setup mocks - only return first device
+        mock_load_creds.return_value = [mock_devices[0]]
+        mock_env_class.return_value = mock_env_vars
+        mock_path_exists.return_value = False
+
+        # Reload configuration
+        service.reload_config()
+
+        # Verify second device was disconnected
+        mock_conn2.disconnect.assert_called_once()
+
+        # Verify only one connection remains
+        assert len(service.connections) == 1
+        assert "192.168.1.1" in service.connections
+        assert "192.168.1.2" not in service.connections
 
 
 class TestLoadDevicesFromCSV:
