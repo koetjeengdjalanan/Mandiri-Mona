@@ -208,7 +208,6 @@ class InfluxDBSettings(BaseModel):
     org: StrictStr = Field(default=getenv("INFLUXDB_ORG", ""), description="InfluxDB organization")
     bucket: StrictStr = Field(default=getenv("INFLUXDB_BUCKET", ""), description="InfluxDB bucket")
 
-    @classmethod
     def conn_params(self) -> dict[str, str]:
         """Return InfluxDB connection parameters as a dictionary."""
         return {
