@@ -423,7 +423,7 @@ class PersistentSSHService:
                     return (ip, None)
 
             except Exception as e:
-                LOGGER.error(f"Error during monitoring cycle for {ip}: {e}")
+                LOGGER.error(f"Error during monitoring cycle for {ip}: {e}", exc_info=True, stack_info=True)
                 return (ip, str(e))
 
         # Use ThreadPoolExecutor to process devices in parallel

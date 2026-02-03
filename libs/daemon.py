@@ -6,7 +6,6 @@ import signal
 import sys
 import time
 from pathlib import Path
-from typing import NoReturn
 
 LOGGER = logging.getLogger("mandiri-mona.daemon")
 
@@ -44,7 +43,7 @@ class DaemonManager:
                     pid = int(f.read().strip())
                     return pid
         except (ValueError, IOError) as e:
-            LOGGER.error(f"Error reading PID file: {e}")
+            LOGGER.error(f"Error reading PID file: {e}", exc_info=True, stack_info=True)
         return None
 
     def is_running(self) -> bool:
@@ -81,7 +80,7 @@ class DaemonManager:
                 f.write(str(os.getpid()))
             LOGGER.info(f"PID file created: {self.pid_file}")
         except IOError as e:
-            LOGGER.error(f"Failed to write PID file: {e}")
+            LOGGER.error(f"Failed to write PID file: {e}", exc_info=True, stack_info=True)
             raise
 
     def remove_pid_file(self) -> None:
@@ -91,7 +90,7 @@ class DaemonManager:
                 self.pid_file.unlink()
                 LOGGER.info(f"PID file removed: {self.pid_file}")
         except IOError as e:
-            LOGGER.error(f"Failed to remove PID file: {e}")
+            LOGGER.error(f"Failed to remove PID file: {e}", exc_info=True, stack_info=True)
 
     def stop_daemon(self) -> bool:
         """
@@ -127,7 +126,7 @@ class DaemonManager:
             return True
 
         except OSError as e:
-            LOGGER.error(f"Failed to stop daemon: {e}")
+            LOGGER.error(f"Failed to stop daemon: {e}", exc_info=True, stack_info=True)
             return False
 
     def reload_daemon(self) -> bool:
@@ -148,7 +147,7 @@ class DaemonManager:
             LOGGER.info("Reload signal sent successfully")
             return True
         except OSError as e:
-            LOGGER.error(f"Failed to send reload signal to daemon: {e}")
+            LOGGER.error(f"Failed to send reload signal to daemon: {e}", exc_info=True, stack_info=True)
             return False
 
     def get_status(self) -> dict[str, str | int | None]:
@@ -189,7 +188,7 @@ def daemonize() -> None:
             # Exit parent process
             sys.exit(0)
     except OSError as e:
-        LOGGER.error(f"First fork failed: {e}")
+        LOGGER.error(f"First fork failed: {e}", exc_info=True, stack_info=True)
         sys.exit(1)
 
     # Decouple from parent environment
@@ -204,7 +203,7 @@ def daemonize() -> None:
             # Exit second parent process
             sys.exit(0)
     except OSError as e:
-        LOGGER.error(f"Second fork failed: {e}")
+        LOGGER.error(f"Second fork failed: {e}", exc_info=True, stack_info=True)
         sys.exit(1)
 
     # Redirect standard file descriptors
