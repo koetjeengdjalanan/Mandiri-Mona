@@ -1,15 +1,11 @@
 """Module for managing persistent SSH connections as a background service."""
 
-import csv
-import ipaddress
 import logging
 import threading
 import time
-from pathlib import Path
 from typing import Callable, Iterable
 
-from netmiko import ConnectHandler, NetmikoTimeoutException
-from tenacity import before_sleep_log, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from netmiko import ConnectHandler
 
 from models.env import EnvironmentsVariables
 from models.main import Devices
@@ -115,7 +111,7 @@ class PersistentSSHConnection:
 
             try:
                 # Use Netmiko's built-in is_alive method if available
-                if hasattr(self.connection, 'is_alive') and callable(self.connection.is_alive):
+                if hasattr(self.connection, "is_alive") and callable(self.connection.is_alive):
                     return self.connection.is_alive()
                 # Fallback: send empty command as keepalive test
                 self.connection.send_command("", expect_string=r">", read_timeout=5)
@@ -229,11 +225,7 @@ class PersistentSSHService:
         Returns:
             Iterable[tuple[str, Callable | None]]: List of (command, processor) tuples.
         """
-        from libs.device_comm import (
-            process_high_availability_state,
-            process_resource_utilization,
-            process_system_info,
-        )
+        from libs.device_comm import process_high_availability_state, process_resource_utilization, process_system_info
 
         commands: list[tuple[str, Callable | None]] = [
             ("show system state | match 1minavg", None),
@@ -304,30 +296,3 @@ class PersistentSSHService:
         finally:
             self.cleanup_connections()
             LOGGER.info("Persistent SSH service stopped")
-
-
-def load_devices_from_csv(csv_path: Path) -> list[Devices]:
-    """
-    Load device credentials from a CSV file.
-
-    Args:
-        csv_path (Path): Path to the CSV file containing device credentials.
-
-    Returns:
-        list[Devices]: List of Devices objects loaded from the CSV.
-    """
-    devices: list[Devices] = []
-    with open(file=csv_path, mode="r") as csvfile:
-        reader = csv.DictReader(csvfile)
-        for row in reader:
-            devices.append(
-                Devices(
-                    device_type=row.get("device_type", ""),
-                    ip=ipaddress.IPv4Address(row.get("ip", "")),
-                    username=row.get("username", ""),
-                    password=row.get("password", ""),
-                    hostname=row.get("hostname", None),
-                    monitored=row.get("monitored", "False").lower() == "true",
-                )
-            )
-    return devices

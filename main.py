@@ -22,7 +22,7 @@ from helper.print_info import info_request
 from libs.daemon import DaemonManager, GracefulShutdown, daemonize
 from libs.device_comm import connect_ssh
 from libs.file_creation import create_ssh_config, update_fw_creds
-from libs.persistent_ssh import PersistentSSHService, load_devices_from_csv
+from libs.persistent_ssh import PersistentSSHService
 from models.env import EnvironmentsVariables
 from models.main import Devices
 
@@ -39,7 +39,7 @@ def daemon_main(interval: int) -> None:
     log = logging.getLogger("mandiri-mona")
 
     # Load devices from CSV
-    devices = load_devices_from_csv(env_vars.file_paths.fw_creds)
+    devices = load_devices_creds(file_path=env_vars.file_paths.fw_creds)
     log.info(f"Loaded {len(devices)} devices from CSV for daemon mode")
 
     # Create SSH config
@@ -173,6 +173,12 @@ if __name__ == "__main__":
 
                 # Handle Ctrl+C gracefully
                 def signal_handler(sig, frame):
+                    """Handle Ctrl+C signal to gracefully stop streaming logs.
+
+                    Args:
+                        sig: The signal number.
+                        frame: The current stack frame.
+                    """
                     process.terminate()
                     console.print("\n[yellow]Stopped streaming logs[/yellow]")
                     sys.exit(0)
@@ -180,8 +186,9 @@ if __name__ == "__main__":
                 signal.signal(signal.SIGINT, signal_handler)
 
                 # Stream the output using console for consistency
-                for line in process.stdout:
-                    console.print(line, end="")
+                if process.stdout is not None:
+                    for line in process.stdout:
+                        console.print(line, end="")
 
             except Exception as e:
                 console.print(f"[red]Error streaming logs: {e}[/red]")

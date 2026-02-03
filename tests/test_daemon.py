@@ -3,7 +3,6 @@
 import os
 import signal
 import tempfile
-import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -178,7 +177,7 @@ class TestGracefulShutdown:
     @patch("signal.signal")
     def test_context_manager_sets_handlers(self, mock_signal):
         """Test context manager sets signal handlers."""
-        with GracefulShutdown() as handler:
+        with GracefulShutdown():
             # Verify signal handlers were set
             calls = mock_signal.call_args_list
             assert len(calls) >= 2

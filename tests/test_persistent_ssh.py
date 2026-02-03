@@ -1,11 +1,9 @@
 """Unit tests for persistent_ssh module."""
 
-import csv
 import tempfile
-import threading
-import time
+from ipaddress import IPv4Address
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -27,7 +25,7 @@ class TestPersistentSSHConnection:
         """Create a mock device for testing."""
         return Devices(
             device_type="paloalto_panos",
-            ip="192.168.1.1",
+            ip=IPv4Address("192.168.1.1"),
             username="admin",
             password="password",
             hostname="test-device",
@@ -86,7 +84,7 @@ class TestPersistentSSHConnection:
         """Test connection sets hostname if not already set."""
         device = Devices(
             device_type="paloalto_panos",
-            ip="192.168.1.1",
+            ip=IPv4Address("192.168.1.1"),
             username="admin",
             password="password",
             hostname=None,
@@ -256,7 +254,7 @@ class TestPersistentSSHService:
         return [
             Devices(
                 device_type="paloalto_panos",
-                ip="192.168.1.1",
+                ip=IPv4Address("192.168.1.1"),
                 username="admin",
                 password="password",
                 hostname="device1",
@@ -264,7 +262,7 @@ class TestPersistentSSHService:
             ),
             Devices(
                 device_type="paloalto_panos",
-                ip="192.168.1.2",
+                ip=IPv4Address("192.168.1.2"),
                 username="admin",
                 password="password",
                 hostname="device2",
@@ -340,7 +338,7 @@ class TestPersistentSSHService:
         """Test getting commands for monitored device."""
         device = Devices(
             device_type="paloalto_panos",
-            ip="192.168.1.1",
+            ip=IPv4Address("192.168.1.1"),
             username="admin",
             password="password",
             hostname="device1",
@@ -359,7 +357,7 @@ class TestPersistentSSHService:
         """Test getting commands for non-monitored device."""
         device = Devices(
             device_type="paloalto_panos",
-            ip="192.168.1.1",
+            ip=IPv4Address("192.168.1.1"),
             username="admin",
             password="password",
             hostname="device1",
@@ -453,7 +451,7 @@ paloalto_panos,192.168.1.2,admin,pass456,device2,false
 
     def test_load_devices_with_missing_fields(self):
         """Test loading devices with optional fields missing.
-        
+
         Note: CSV empty fields become empty strings, not None.
         """
         csv_content = """device_type,ip,username,password,hostname,monitored
@@ -468,7 +466,7 @@ paloalto_panos,192.168.1.1,admin,pass123,,
 
             assert len(devices) == 1
             # Empty CSV field becomes empty string
-            assert devices[0].hostname == ''
+            assert devices[0].hostname == ""
             assert devices[0].monitored is False  # Default value
         finally:
             csv_path.unlink()
