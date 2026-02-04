@@ -187,7 +187,7 @@ class TestPersistentSSHConnection:
             ("show memory", None),
         ]
 
-        result = conn.execute_commands(commands)
+        result = conn.execute_commands_compatibility(commands)
 
         assert "show cpu" in result
         assert "show memory" in result
@@ -209,7 +209,7 @@ class TestPersistentSSHConnection:
         conn.connect()
 
         commands = [("show info", processor)]
-        result = conn.execute_commands(commands)
+        result = conn.execute_commands_compatibility(commands)
 
         assert "LINE1\nLINE2\nLINE3" in result
 
@@ -225,7 +225,7 @@ class TestPersistentSSHConnection:
         conn.connect()
 
         commands = [("show error", None)]
-        result = conn.execute_commands(commands)
+        result = conn.execute_commands_compatibility(commands)
 
         assert "ERROR" in result
         assert "Command failed" in result
@@ -237,7 +237,7 @@ class TestPersistentSSHConnection:
         commands = [("show test", None)]
 
         with pytest.raises(ConnectionError):
-            conn.execute_commands(commands)
+            conn.execute_commands_compatibility(commands)
 
 
 class TestPersistentSSHService:
@@ -374,7 +374,7 @@ class TestPersistentSSHService:
         """Test running one monitoring cycle."""
         mock_conn = MagicMock()
         mock_conn.is_alive.return_value = True
-        mock_conn.execute_commands.return_value = "Test output"
+        mock_conn.execute_commands_compatibility.return_value = "Test output"
         mock_conn.device = mock_devices[0]
 
         service = PersistentSSHService(mock_devices, mock_env_vars, interval=60)
@@ -386,7 +386,7 @@ class TestPersistentSSHService:
         service.run_monitoring_cycle()
 
         mock_conn.is_alive.assert_called_once()
-        mock_conn.execute_commands.assert_called_once()
+        mock_conn.execute_commands_compatibility.assert_called_once()
         mock_file.write.assert_called()
 
     @patch("libs.persistent_ssh.PersistentSSHConnection")
@@ -394,7 +394,7 @@ class TestPersistentSSHService:
         """Test monitoring cycle with reconnection."""
         mock_conn = MagicMock()
         mock_conn.is_alive.return_value = False
-        mock_conn.execute_commands.return_value = "Test output"
+        mock_conn.execute_commands_compatibility.return_value = "Test output"
         mock_conn.device = mock_devices[0]
 
         service = PersistentSSHService(mock_devices, mock_env_vars, interval=60)

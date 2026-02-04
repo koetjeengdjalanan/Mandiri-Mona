@@ -1,6 +1,7 @@
 """Module for managing persistent SSH connections as a background service."""
 
 import datetime
+import gc
 import logging
 import threading
 import time
@@ -97,17 +98,42 @@ class PersistentSSHConnection:
                 raise
 
     def disconnect(self) -> None:
-        """Disconnect from the device."""
+        """Disconnect from the device and ensure all resources are released."""
         with self.lock:
-            if self.connection and self._connected:
+            if self.connection:
                 try:
-                    self.connection.disconnect()
-                    LOGGER.info(f"Disconnected from {self.device.hostname or self.device.ip}")
+                    LOGGER.info(f"Disconnecting from {self.device.hostname or self.device.ip}")
+
+                    # Explicitly close the SSH connection
+                    if hasattr(self.connection, "disconnect"):
+                        self.connection.disconnect()
+
+                    # Force cleanup of underlying paramiko SSH client and transport
+                    if hasattr(self.connection, "remote_conn"):
+                        try:
+                            if hasattr(self.connection.remote_conn, "close"):
+                                self.connection.remote_conn.close()
+                        except Exception:
+                            pass
+
+                    # Close any remaining channel connections
+                    if hasattr(self.connection, "remote_conn_pre"):
+                        try:
+                            if hasattr(self.connection.remote_conn_pre, "close"):
+                                self.connection.remote_conn_pre.close()
+                        except Exception:
+                            pass
+
+                    LOGGER.debug(f"Disconnected from {self.device.hostname or self.device.ip}")
+
                 except Exception as e:
-                    LOGGER.error(f"Error during disconnect from {self.device.hostname or self.device.ip}: {e}")
+                    LOGGER.warning(f"Error during disconnect from {self.device.hostname or self.device.ip}: {e}")
                 finally:
+                    # Always mark as disconnected and clear the connection reference
                     self._connected = False
                     self.connection = None
+                    # Force garbage collection to release file descriptors
+                    gc.collect()
 
     def is_alive(self) -> bool:
         """
@@ -135,9 +161,25 @@ class PersistentSSHConnection:
     def reconnect(self) -> None:
         """Reconnect to the device if connection is lost."""
         LOGGER.info(f"Attempting to reconnect to {self.device.hostname or self.device.ip}")
-        self.disconnect()
+
+        # Ensure old connection is fully cleaned up before reconnecting
+        try:
+            self.disconnect()
+        except Exception as e:
+            LOGGER.warning(f"Error during pre-reconnect cleanup for {self.device.hostname or self.device.ip}: {e}")
+
+        # Wait before reconnecting to avoid rapid reconnection attempts
         time.sleep(RECONNECT_DELAY_SECONDS)
-        self.connect()
+
+        # Attempt to reconnect
+        try:
+            self.connect()
+        except Exception as e:
+            LOGGER.error(f"Reconnection failed for {self.device.hostname or self.device.ip}: {e}")
+            # Ensure connection state is clean even if reconnection fails
+            self._connected = False
+            self.connection = None
+            raise
 
     def execute_commands_compatibility(self, commands: Iterable[tuple[str, Callable | None]]) -> str:
         """
@@ -376,7 +418,12 @@ class PersistentSSHService:
                 # Check connection health
                 if not conn.is_alive():
                     LOGGER.warning(f"Connection to {conn.device.hostname or ip} is not alive, reconnecting")
-                    conn.reconnect()
+                    try:
+                        conn.reconnect()
+                    except Exception as reconnect_error:
+                        LOGGER.error(f"Failed to reconnect to {ip}: {reconnect_error}")
+                        # Don't retry immediately - let the next cycle handle it
+                        return (ip, f"Reconnection failed: {reconnect_error}")
 
                 if self.env_vars.compatibility_mode:
                     LOGGER.info(f"Using compatibility mode for {conn.device.hostname or ip}")
@@ -425,6 +472,9 @@ class PersistentSSHService:
             except Exception as e:
                 LOGGER.error(f"Error during monitoring cycle for {ip}: {e}", exc_info=True, stack_info=True)
                 return (ip, str(e))
+            finally:
+                # Force garbage collection after each device to release file descriptors
+                gc.collect()
 
         # Use ThreadPoolExecutor to process devices in parallel
         with ThreadPoolExecutor(max_workers=max_workers, thread_name_prefix="MandiriMona_Monitor") as executor:
@@ -441,6 +491,8 @@ class PersistentSSHService:
                 except Exception as e:
                     LOGGER.error(f"Unexpected error processing device {ip}: {e}")
 
+        # Force garbage collection after all devices are processed
+        gc.collect()
         LOGGER.info("Monitoring cycle completed")
 
     def run(self, shutdown_handler) -> None:
