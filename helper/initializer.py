@@ -156,6 +156,19 @@ LOG_DATETIME_FORMAT=%Y-%m-%d %H:%M:%S
 FW_CREDS_PATH=./configs/fw_creds.csv
 SSHD_CONFIG_PATH=./configs/sshd_config
 OUTPUT_DIR_PATH=./outputs/
+
+# InfluxDB Credentials
+INFLUXDB_URL=http://localhost:8086
+INFLUXDB_TOKEN=your-influxdb-token
+INFLUXDB_ORG=your-org
+INFLUXDB_BUCKET=mandiri-mona
+
+# InfluxDB Connection Pool Settings (to prevent file descriptor exhaustion)
+INFLUXDB_CONNECTION_POOL_MAXSIZE=10
+INFLUXDB_MAX_RETRIES=2
+INFLUXDB_TIMEOUT_MS=30000
+INFLUXDB_BATCH_SIZE=500
+INFLUXDB_FLUSH_INTERVAL_MS=10000
 """
     env_path = Path(getenv("MANDIRI_MONA_ENV") or Path(__file__).resolve().parents[1] / ".env")
     with open(env_path, "w") as f:

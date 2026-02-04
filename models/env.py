@@ -198,22 +198,46 @@ class InfluxDBSettings(BaseModel):
         url (StrictStr): InfluxDB URL, loaded from environment variable 'INFLUXDB_URL'.
         org (StrictStr): InfluxDB organization, loaded from environment variable 'INFLUXDB_ORG'.
         bucket (StrictStr): InfluxDB bucket, loaded from environment variable 'INFLUXDB_BUCKET'.
+        connection_pool_maxsize (PositiveInt): Maximum number of concurrent HTTP connections to InfluxDB.
+        max_retries (PositiveInt): Maximum retry attempts for failed writes.
+        timeout_ms (PositiveInt): Request timeout in milliseconds.
+        batch_size (PositiveInt): Number of points to batch before writing.
+        flush_interval_ms (PositiveInt): Flush interval in milliseconds.
 
     Methods:
-        conn_params() -> dict[str, str]: Returns a dictionary containing the connection parameters ('url', 'token', 'org').
+        conn_params() -> dict[str, str | int]: Returns a dictionary containing all connection parameters.
     """  # noqa: E501
 
     token: StrictStr = Field(default=getenv("INFLUXDB_TOKEN", ""), description="InfluxDB authentication token")
     url: StrictStr = Field(default=getenv("INFLUXDB_URL", ""), description="InfluxDB URL")
     org: StrictStr = Field(default=getenv("INFLUXDB_ORG", ""), description="InfluxDB organization")
     bucket: StrictStr = Field(default=getenv("INFLUXDB_BUCKET", ""), description="InfluxDB bucket")
+    connection_pool_maxsize: PositiveInt = Field(
+        int(getenv("INFLUXDB_CONNECTION_POOL_MAXSIZE", "10")),
+        description="Maximum number of concurrent HTTP connections to InfluxDB",
+    )
+    max_retries: PositiveInt = Field(
+        int(getenv("INFLUXDB_MAX_RETRIES", "2")), description="Maximum retry attempts for failed writes"
+    )
+    timeout_ms: PositiveInt = Field(
+        int(getenv("INFLUXDB_TIMEOUT_MS", "30000")), description="Request timeout in milliseconds"
+    )
+    batch_size: PositiveInt = Field(
+        int(getenv("INFLUXDB_BATCH_SIZE", "500")), description="Number of points to batch before writing"
+    )
+    flush_interval_ms: PositiveInt = Field(
+        int(getenv("INFLUXDB_FLUSH_INTERVAL_MS", "10000")), description="Flush interval in milliseconds"
+    )
 
-    def conn_params(self) -> dict[str, str]:
+    def conn_params(self) -> dict[str, str | int]:
         """Return InfluxDB connection parameters as a dictionary."""
         return {
-            "url": self.url,
-            "token": self.token,
-            "org": self.org,
+            "url": str(self.url),
+            "token": str(self.token),
+            "org": str(self.org),
+            "timeout": int(self.timeout_ms),
+            "enable_gzip": True,
+            "connection_pool_maxsize": int(self.connection_pool_maxsize),
         }
 
 

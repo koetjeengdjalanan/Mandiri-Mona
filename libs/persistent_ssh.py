@@ -9,10 +9,10 @@ import zoneinfo
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Callable, Iterable
 
-from influxdb_client import Point, WritePrecision
+from influxdb_client import InfluxDBClient, Point, WritePrecision
+from influxdb_client.client.write_api import WriteOptions
 from netmiko import ConnectHandler
 
-from config.contexts import influx_connection
 from libs import COMMANDS_LIST
 from models.env import EnvironmentsVariables
 from models.main import Devices
@@ -276,6 +276,45 @@ class PersistentSSHService:
         self.interval = interval
         self.connections: dict[str, PersistentSSHConnection] = {}
         self._reload_lock = threading.Lock()  # Lock for thread-safe reload operations
+        self._write_lock = threading.Lock()  # Lock for thread-safe InfluxDB writes
+        self._file_write_lock = threading.Lock()  # Lock for thread-safe file writes
+
+        # Initialize persistent InfluxDB client to avoid file descriptor leaks
+        self.influxdb_client: InfluxDBClient | None = None
+        self.write_api = None
+
+        if not env_vars.compatibility_mode:
+            try:
+                LOGGER.info("Initializing persistent InfluxDB client")
+                # Get connection parameters
+                conn_params = env_vars.influxdb.conn_params()
+                self.influxdb_client = InfluxDBClient(
+                    url=conn_params["url"],
+                    token=conn_params["token"],  # type: ignore[arg-type]
+                    org=conn_params["org"],  # type: ignore[arg-type]
+                    timeout=conn_params["timeout"],
+                    enable_gzip=conn_params["enable_gzip"],
+                    connection_pool_maxsize=conn_params["connection_pool_maxsize"],
+                )
+                # Use batched write API with proper thread-safe options
+                write_options = WriteOptions(
+                    batch_size=env_vars.influxdb.batch_size,
+                    flush_interval=env_vars.influxdb.flush_interval_ms,
+                    jitter_interval=0,
+                    retry_interval=5000,
+                    max_retries=env_vars.influxdb.max_retries,
+                    max_retry_delay=30000,
+                    exponential_base=2,
+                )
+                self.write_api = self.influxdb_client.write_api(write_options=write_options)
+                LOGGER.info(
+                    f"InfluxDB client initialized - Pool size: {env_vars.influxdb.connection_pool_maxsize}, "
+                    f"Batch size: {env_vars.influxdb.batch_size}"
+                )
+            except Exception as e:
+                LOGGER.error(f"Failed to initialize InfluxDB client: {e}", exc_info=True)
+                self.influxdb_client = None
+                self.write_api = None
 
     def initialize_connections(self) -> None:
         """Establish initial connections to all devices."""
@@ -292,14 +331,43 @@ class PersistentSSHService:
         LOGGER.info(f"Successfully connected to {len(self.connections)}/{len(self.devices)} devices")
 
     def cleanup_connections(self) -> None:
-        """Disconnect from all devices."""
+        """Disconnect from all devices and close InfluxDB client."""
         LOGGER.info("Cleaning up all connections")
+
+        # Close SSH connections
         for ip, conn in self.connections.items():
             try:
                 conn.disconnect()
             except Exception as e:
                 LOGGER.error(f"Error disconnecting from {ip}: {e}")
         self.connections.clear()
+
+        # Close InfluxDB client and release file descriptors
+        if self.influxdb_client:
+            try:
+                LOGGER.info("Closing InfluxDB client")
+                # Flush any pending writes before closing
+                if self.write_api:
+                    try:
+                        LOGGER.info("Flushing pending InfluxDB writes")
+                        self.write_api.flush()
+                        # Give time for flush to complete
+                        time.sleep(1)
+                        # Close write API
+                        self.write_api.close()
+                    except Exception as e:
+                        LOGGER.warning(f"Error flushing/closing write API: {e}")
+                # Close client connection
+                self.influxdb_client.close()
+                LOGGER.info("InfluxDB client closed successfully")
+            except Exception as e:
+                LOGGER.error(f"Error closing InfluxDB client: {e}")
+            finally:
+                self.influxdb_client = None
+                self.write_api = None
+
+        # Force garbage collection to release file descriptors
+        gc.collect()
 
     def reload_config(self) -> None:
         """
@@ -431,14 +499,15 @@ class PersistentSSHService:
                     commands = self.get_commands_for_device(conn.device)
                     result = conn.execute_commands_compatibility(commands)
 
-                    # Write output to file
+                    # Write output to file with thread-safe locking
                     output_file = self.env_vars.file_paths.output_dir.joinpath(f"{conn.device.hostname}.log")
-                    with open(output_file, "a") as f:
-                        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-                        f.write(f"\n{'=' * 50}\n")
-                        f.write(f"Timestamp: {timestamp}\n")
-                        f.write(f"{'=' * 50}\n")
-                        f.write(result)
+                    with self._file_write_lock:
+                        with open(output_file, "a") as f:
+                            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+                            f.write(f"\n{'=' * 50}\n")
+                            f.write(f"Timestamp: {timestamp}\n")
+                            f.write(f"{'=' * 50}\n")
+                            f.write(result)
 
                     LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
                     return (ip, None)
@@ -446,25 +515,39 @@ class PersistentSSHService:
                     commands: list[tuple[str, Callable | None]] = COMMANDS_LIST["influxdb_format"]
                     result = conn.execute_commands(commands)
 
-                    payload: Point = Point.from_dict(
-                        {
-                            "measurement": "pa_devices_hw_metrics",
-                            "tags": {
-                                "device_ip": str(ip),
-                                "device_name": conn.device.hostname,
-                            },
-                            "fields": result,
-                            "time": int(datetime.datetime.now(tz=zoneinfo.ZoneInfo("Asia/Jakarta")).timestamp()),
-                        },
-                        write_precision=WritePrecision.S,  # type: ignore[invalid-argument-type]
-                    )
-                    with influx_connection(self.env_vars.influxdb.conn_params()) as db_conn:
-                        write_api = db_conn.write_api()
-                        write_api.write(
-                            bucket=self.env_vars.influxdb.bucket,
-                            org=self.env_vars.influxdb.org,
-                            record=payload,
-                        )
+                    # Write to InfluxDB using persistent client with thread-safe locking
+                    if self.write_api:
+                        try:
+                            payload: Point = Point.from_dict(
+                                {
+                                    "measurement": "pa_devices_hw_metrics",
+                                    "tags": {
+                                        "device_ip": str(ip),
+                                        "device_name": conn.device.hostname,
+                                    },
+                                    "fields": result,
+                                    "time": int(
+                                        datetime.datetime.now(tz=zoneinfo.ZoneInfo("Asia/Jakarta")).timestamp()
+                                    ),
+                                },
+                                write_precision=WritePrecision.S,  # type: ignore[invalid-argument-type]
+                            )
+                            # Thread-safe write with lock to prevent concurrent write issues
+                            with self._write_lock:
+                                self.write_api.write(
+                                    bucket=self.env_vars.influxdb.bucket,
+                                    org=self.env_vars.influxdb.org,
+                                    record=payload,
+                                )
+                            LOGGER.debug(f"Wrote metrics to InfluxDB for {conn.device.hostname}")
+                        except Exception as write_error:
+                            LOGGER.error(
+                                f"Error writing to InfluxDB for {conn.device.hostname}: {write_error}",
+                                exc_info=True,
+                            )
+                            # Don't fail the monitoring cycle, just log the error
+                    else:
+                        LOGGER.warning(f"InfluxDB write API not available, skipping write for {conn.device.hostname}")
 
                     LOGGER.info(f"Monitoring cycle completed for {conn.device.hostname}")
                     return (ip, None)

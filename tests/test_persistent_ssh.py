@@ -1,6 +1,8 @@
 """Unit tests for persistent_ssh module."""
 
 import tempfile
+import threading
+import time
 from ipaddress import IPv4Address
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -276,6 +278,7 @@ class TestPersistentSSHService:
         env.conn.conn_timeout = 30
         env.conn.read_timeout_override = 60
         env.conn.num_of_threads = 4  # ThreadPoolExecutor requires an actual integer value
+        env.compatibility_mode = True  # Default to compatibility mode to avoid InfluxDB setup
         return env
 
     def test_init(self, mock_devices, mock_env_vars):
@@ -567,3 +570,439 @@ paloalto_panos,192.168.1.1,admin,pass123,,
             assert devices[0].monitored is False  # Default value
         finally:
             csv_path.unlink()
+
+
+class TestThreadSafetyAndConcurrency:
+    """Test suite for thread-safe concurrent operations."""
+
+    @pytest.fixture
+    def mock_devices(self):
+        """Create multiple mock devices for concurrency testing."""
+        return [
+            Devices(
+                device_type="paloalto_panos",
+                ip=IPv4Address(f"192.168.1.{i}"),
+                username="admin",
+                password="password",
+                hostname=f"device{i}",
+                monitored=True,
+            )
+            for i in range(1, 11)  # 10 devices
+        ]
+
+    @pytest.fixture
+    def mock_env_vars_with_influxdb(self):
+        """Create mock environment variables with InfluxDB configuration."""
+        env = MagicMock(spec=EnvironmentsVariables)
+        env.file_paths = MagicMock()
+        env.file_paths.sshd_config = Path("/tmp/sshd_config")
+        env.file_paths.output_dir = Path("/tmp/output")
+        env.conn = MagicMock()
+        env.conn.conn_timeout = 30
+        env.conn.read_timeout_override = 60
+        env.conn.num_of_threads = 10
+        env.compatibility_mode = False
+        env.influxdb = MagicMock()
+        env.influxdb.url = "http://localhost:8086"
+        env.influxdb.token = "test-token"
+        env.influxdb.org = "test-org"
+        env.influxdb.bucket = "test-bucket"
+        env.influxdb.connection_pool_maxsize = 10
+        env.influxdb.batch_size = 500
+        env.influxdb.flush_interval_ms = 10000
+        env.influxdb.max_retries = 2
+        env.influxdb.timeout_ms = 30000
+        env.influxdb.conn_params.return_value = {
+            "url": "http://localhost:8086",
+            "token": "test-token",
+            "org": "test-org",
+            "timeout": 30000,
+            "enable_gzip": True,
+            "connection_pool_maxsize": 10,
+        }
+        return env
+
+    @pytest.fixture
+    def mock_env_vars_compatibility(self):
+        """Create mock environment variables for compatibility mode."""
+        env = MagicMock(spec=EnvironmentsVariables)
+        env.file_paths = MagicMock()
+        env.file_paths.sshd_config = Path("/tmp/sshd_config")
+        env.file_paths.output_dir = Path("/tmp/output")
+        env.conn = MagicMock()
+        env.conn.conn_timeout = 30
+        env.conn.read_timeout_override = 60
+        env.conn.num_of_threads = 10
+        env.compatibility_mode = True
+        return env
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_influxdb_client_initialization(self, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb):
+        """Test InfluxDB client is initialized with correct parameters."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        service = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+        # Verify InfluxDB client was initialized
+        assert service.influxdb_client is not None
+        assert service.write_api is not None
+        mock_influxdb_client.assert_called_once()
+
+        # Verify connection parameters
+        call_kwargs = mock_influxdb_client.call_args[1]
+        assert call_kwargs["url"] == "http://localhost:8086"
+        assert call_kwargs["token"] == "test-token"
+        assert call_kwargs["org"] == "test-org"
+        assert call_kwargs["connection_pool_maxsize"] == 10
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_influxdb_write_options_configuration(
+        self, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test write API is configured with proper batching options."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        _ = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+        # Verify write_api was called with WriteOptions
+        mock_client.write_api.assert_called_once()
+        write_options = mock_client.write_api.call_args[1]["write_options"]
+
+        # Verify WriteOptions configuration
+        assert write_options.batch_size == 500
+        assert write_options.flush_interval == 10000
+        assert write_options.max_retries == 2
+
+    def test_service_has_write_locks(self, mock_devices, mock_env_vars_with_influxdb):
+        """Test service initializes thread locks for concurrent writes."""
+        with patch("libs.persistent_ssh.InfluxDBClient"):
+            service = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+            # Verify locks exist
+            assert hasattr(service, "_write_lock")
+            assert hasattr(service, "_file_write_lock")
+            assert hasattr(service, "_reload_lock")
+            # Check locks have acquire/release methods (duck typing)
+            assert callable(getattr(service._write_lock, "acquire", None))
+            assert callable(getattr(service._write_lock, "release", None))
+            assert callable(getattr(service._file_write_lock, "acquire", None))
+            assert callable(getattr(service._file_write_lock, "release", None))
+            assert callable(getattr(service._reload_lock, "acquire", None))
+            assert callable(getattr(service._reload_lock, "release", None))
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_concurrent_influxdb_writes_use_lock(
+        self, mock_conn_class, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test concurrent InfluxDB writes are serialized with lock."""
+        # Setup mocks
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        mock_conn = MagicMock()
+        mock_conn.is_alive.return_value = True
+        mock_conn.execute_commands.return_value = {"cpu": 50.0, "memory": 60.0}
+        mock_conn.device.hostname = "test-device"
+        mock_conn_class.return_value = mock_conn
+
+        service = PersistentSSHService(mock_devices[:3], mock_env_vars_with_influxdb, interval=60)
+        service.connections = {
+            "192.168.1.1": mock_conn,
+            "192.168.1.2": mock_conn,
+            "192.168.1.3": mock_conn,
+        }
+
+        # Use a custom lock to track acquisitions
+        original_lock = service._write_lock
+        tracked_lock = MagicMock(wraps=original_lock)
+        service._write_lock = tracked_lock
+
+        # Run monitoring cycle with multiple devices
+        service.run_monitoring_cycle()
+
+        # Verify lock was used (both __enter__ and __exit__ for context manager)
+        assert tracked_lock.__enter__.call_count == 3
+        assert tracked_lock.__exit__.call_count == 3
+
+    @patch("builtins.open", create=True)
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_concurrent_file_writes_use_lock(
+        self, mock_conn_class, mock_open, mock_devices, mock_env_vars_compatibility
+    ):
+        """Test concurrent file writes in compatibility mode are serialized with lock."""
+        mock_conn = MagicMock()
+        mock_conn.is_alive.return_value = True
+        mock_conn.execute_commands_compatibility.return_value = "Test output"
+        mock_conn.device.hostname = "test-device"
+        mock_conn_class.return_value = mock_conn
+
+        service = PersistentSSHService(mock_devices[:3], mock_env_vars_compatibility, interval=60)
+        service.connections = {
+            "192.168.1.1": mock_conn,
+            "192.168.1.2": mock_conn,
+            "192.168.1.3": mock_conn,
+        }
+
+        # Use a custom lock to track acquisitions
+        original_lock = service._file_write_lock
+        tracked_lock = MagicMock(wraps=original_lock)
+        service._file_write_lock = tracked_lock
+
+        # Mock file handle
+        mock_file = MagicMock()
+        mock_open.return_value.__enter__.return_value = mock_file
+
+        # Run monitoring cycle
+        service.run_monitoring_cycle()
+
+        # Verify lock was used (both __enter__ and __exit__ for context manager)
+        assert tracked_lock.__enter__.call_count == 3
+        assert tracked_lock.__exit__.call_count == 3
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_multiple_devices_processed_concurrently(
+        self, mock_conn_class, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test multiple devices are processed in parallel."""
+        # Setup mocks
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        # Track which devices are being processed and when
+        processing_times = {}
+        processing_lock = threading.Lock()
+
+        def create_mock_conn(device):
+            mock_conn = MagicMock()
+            mock_conn.is_alive.return_value = True
+            mock_conn.device = device
+
+            def execute_commands(*args):
+                with processing_lock:
+                    processing_times[str(device.ip)] = time.time()
+                # Simulate some work
+                time.sleep(0.1)
+                return {"cpu": 50.0}
+
+            mock_conn.execute_commands = execute_commands
+            return mock_conn
+
+        service = PersistentSSHService(mock_devices[:5], mock_env_vars_with_influxdb, interval=60)
+        service.connections = {str(device.ip): create_mock_conn(device) for device in mock_devices[:5]}
+
+        start_time = time.time()
+        service.run_monitoring_cycle()
+        end_time = time.time()
+
+        # If processed serially, would take 5 * 0.1 = 0.5s
+        # If processed in parallel, should take ~0.1s (plus overhead)
+        # We allow generous margin for CI/slow machines
+        assert (
+            end_time - start_time < 0.5
+        ), f"Devices should be processed concurrently (took {end_time - start_time:.2f}s)"
+
+        # Verify all devices were processed
+        assert len(processing_times) == 5
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_cleanup_flushes_pending_writes(self, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb):
+        """Test cleanup properly flushes pending writes before closing."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        service = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+        # Cleanup connections
+        with patch("time.sleep"):  # Speed up test
+            service.cleanup_connections()
+
+        # Verify flush was called before close
+        mock_write_api.flush.assert_called_once()
+        mock_write_api.close.assert_called_once()
+        mock_client.close.assert_called_once()
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_cleanup_handles_flush_errors_gracefully(
+        self, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test cleanup continues even if flush fails."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_write_api.flush.side_effect = Exception("Flush failed")
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        service = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+        # Should not raise exception
+        with patch("time.sleep"):
+            service.cleanup_connections()
+
+        # Verify close was still attempted
+        mock_client.close.assert_called_once()
+        assert service.influxdb_client is None
+        assert service.write_api is None
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_influxdb_write_error_does_not_stop_monitoring(
+        self, mock_conn_class, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test InfluxDB write errors don't stop the monitoring cycle."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+        mock_write_api.write.side_effect = Exception("Write failed")
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        mock_conn = MagicMock()
+        mock_conn.is_alive.return_value = True
+        mock_conn.execute_commands.return_value = {"cpu": 50.0}
+        mock_conn.device.hostname = "test-device"
+        mock_conn_class.return_value = mock_conn
+
+        service = PersistentSSHService(mock_devices[:2], mock_env_vars_with_influxdb, interval=60)
+        service.connections = {"192.168.1.1": mock_conn, "192.168.1.2": mock_conn}
+
+        # Should not raise exception
+        service.run_monitoring_cycle()
+
+        # Verify both devices were processed despite write errors
+        assert mock_conn.execute_commands.call_count == 2
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_no_influxdb_client_in_compatibility_mode(
+        self, mock_influxdb_client, mock_devices, mock_env_vars_compatibility
+    ):
+        """Test InfluxDB client is not initialized in compatibility mode."""
+        service = PersistentSSHService(mock_devices, mock_env_vars_compatibility, interval=60)
+
+        # Verify InfluxDB client was NOT initialized
+        assert service.influxdb_client is None
+        assert service.write_api is None
+        mock_influxdb_client.assert_not_called()
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    def test_influxdb_initialization_failure_handled_gracefully(
+        self, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test service continues if InfluxDB client initialization fails."""
+        mock_influxdb_client.side_effect = Exception("Connection failed")
+
+        # Should not raise exception
+        service = PersistentSSHService(mock_devices, mock_env_vars_with_influxdb, interval=60)
+
+        # Service should still be created, but without InfluxDB client
+        assert service.influxdb_client is None
+        assert service.write_api is None
+
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_ssh_connection_disconnect_with_resource_cleanup(
+        self, mock_conn_class, mock_devices, mock_env_vars_compatibility
+    ):
+        """Test SSH connections are properly cleaned up with garbage collection."""
+        mock_conn = MagicMock()
+        mock_conn.disconnect = MagicMock()
+        mock_conn_class.return_value = mock_conn
+
+        service = PersistentSSHService(mock_devices[:3], mock_env_vars_compatibility, interval=60)
+        service.connections = {
+            "192.168.1.1": mock_conn,
+            "192.168.1.2": mock_conn,
+            "192.168.1.3": mock_conn,
+        }
+
+        # Cleanup
+        with patch("gc.collect") as mock_gc:
+            service.cleanup_connections()
+
+        # Verify all connections were disconnected
+        assert mock_conn.disconnect.call_count == 3
+        # Verify garbage collection was called
+        mock_gc.assert_called()
+
+    @patch("libs.persistent_ssh.ConnectHandler")
+    def test_ssh_disconnect_closes_all_channels(self, mock_handler, mock_devices, mock_env_vars_compatibility):
+        """Test disconnect closes all SSH channels and connections."""
+        mock_connection = MagicMock()
+        mock_connection.send_command.return_value = "hostname: test-device"
+
+        # Create mock remote connections
+        mock_remote_conn = MagicMock()
+        mock_remote_conn_pre = MagicMock()
+        mock_connection.remote_conn = mock_remote_conn
+        mock_connection.remote_conn_pre = mock_remote_conn_pre
+
+        mock_handler.return_value = mock_connection
+
+        conn = PersistentSSHConnection(mock_devices[0], mock_env_vars_compatibility)
+        conn.connect()
+
+        # Disconnect
+        with patch("gc.collect"):
+            conn.disconnect()
+
+        # Verify all connections were closed
+        mock_connection.disconnect.assert_called_once()
+        mock_remote_conn.close.assert_called_once()
+        mock_remote_conn_pre.close.assert_called_once()
+
+    @patch("libs.persistent_ssh.InfluxDBClient")
+    @patch("libs.persistent_ssh.PersistentSSHConnection")
+    def test_write_lock_prevents_race_conditions(
+        self, mock_conn_class, mock_influxdb_client, mock_devices, mock_env_vars_with_influxdb
+    ):
+        """Test write lock prevents data races during concurrent writes."""
+        mock_client = MagicMock()
+        mock_write_api = MagicMock()
+
+        # Simulate slow write operation
+        write_order = []
+        lock = threading.Lock()
+
+        def slow_write(*args, **kwargs):
+            with lock:
+                write_order.append("start")
+            time.sleep(0.05)
+            with lock:
+                write_order.append("end")
+
+        mock_write_api.write = slow_write
+        mock_client.write_api.return_value = mock_write_api
+        mock_influxdb_client.return_value = mock_client
+
+        mock_conn = MagicMock()
+        mock_conn.is_alive.return_value = True
+        mock_conn.execute_commands.return_value = {"cpu": 50.0}
+        mock_conn.device.hostname = "test-device"
+        mock_conn_class.return_value = mock_conn
+
+        service = PersistentSSHService(mock_devices[:3], mock_env_vars_with_influxdb, interval=60)
+        service.connections = {
+            "192.168.1.1": mock_conn,
+            "192.168.1.2": mock_conn,
+            "192.168.1.3": mock_conn,
+        }
+
+        service.run_monitoring_cycle()
+
+        # Verify writes were serialized (each complete before next starts)
+        # Pattern should be: start, end, start, end, start, end
+        for i in range(0, len(write_order), 2):
+            if i + 1 < len(write_order):
+                assert write_order[i] == "start"
+                assert write_order[i + 1] == "end"
