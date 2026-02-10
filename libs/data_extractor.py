@@ -11,6 +11,7 @@ __all__: list[str] = [
     "ha_state",
     "packet_buffer_stats",
     "disk_usage",
+    "operational_mode",
 ]
 
 LOGGER = logging.getLogger("mandiri-mona.data_extractor")
