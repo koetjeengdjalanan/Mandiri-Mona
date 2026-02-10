@@ -158,7 +158,7 @@ def ha_state(raw: str) -> dict[str, str | None]:
             - "sync.state": The enabled status value or None if not found
             - "conf.sync": The mode value or None if not found
     """
-    expression = re.compile(r"State:\s(\w+)[\S\s]+Enabled:\s(\w+)[\S\s]+:\s(\w+)", re.MULTILINE)
+    expression = re.compile(r"State:\s(\w+)[\S\s]+State Synchronization:\s(\S+)\;[\S\s]+:\s(\w+)", re.MULTILINE)
 
     states = expression.findall(raw)
     state_list: list[str | None] = []
