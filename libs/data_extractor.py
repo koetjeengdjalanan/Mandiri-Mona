@@ -202,7 +202,7 @@ def packet_buffer_stats(raw: str) -> dict[str, float | None]:
     """
     expression: dict[str, re.Pattern] = {
         "dp": re.compile(r"^DP\s(\w+).+$", re.MULTILINE),
-        "per_section": re.compile(r"^(.+)\((.+)\).+\s+(\d)\s+(\d)", re.MULTILINE),
+        "per_section": re.compile(r"^(.+)\((.+)\).+\s+(\d+)\s+(\d+)", re.MULTILINE),
     }
     res: dict[str, float | None] = {}
 
@@ -271,3 +271,33 @@ def disk_usage(raw: str) -> dict[str, str]:
         res.append(dict(zip(keys, subs)))
 
     return {"disk.usage": json.dumps(res)}
+
+
+def operational_mode(raw: str) -> dict[str, str | None]:
+    r"""
+    Extract operational mode from raw system info output.
+
+    Parses raw text output to extract the operational mode of the system using
+    regex pattern matching. Returns a dictionary with the key 'operational_mode'
+    mapped to its corresponding value or None if not found.
+
+    Args:
+        raw: Raw output string containing system info with a line formatted as
+                "operational-mode: <mode>".
+
+    Returns:
+        A dictionary with the key 'operational_mode' and its corresponding value
+        as a string, or None if the mode cannot be extracted.
+
+    Examples:
+        >>> raw = "system info\\noperational-mode: active\\nother info"
+        >>> operational_mode(raw)
+        {'ops.mode': 'active'}
+    """
+    expression = re.compile(r"^operational-mode:\s+(\w+)", re.MULTILINE)
+    match = expression.search(raw)
+
+    if match:
+        return {"ops.mode": match.group(1)}
+    else:
+        return {"ops.mode": None}

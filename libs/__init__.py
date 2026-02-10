@@ -21,5 +21,6 @@ COMMANDS_LIST: dict[str, list[tuple[str, Callable | None]]] = {
         (r'show high-availability state | match "State\|Enabled\|Running Configuration"', ha_state),
         ("show running resource-monitor minute last 2", packet_buffer_stats),
         ("show system disk-space", disk_usage),
+        ("show system info | match operational-mode", None),
     ],
 }
